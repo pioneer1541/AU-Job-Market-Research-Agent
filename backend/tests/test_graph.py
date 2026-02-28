@@ -2,6 +2,8 @@
 Tests for LangGraph graph structure
 """
 import sys
+import os
+import asyncio
 from pathlib import Path
 from unittest.mock import patch, AsyncMock, MagicMock
 
@@ -27,27 +29,38 @@ class TestGraphStructure:
         app = get_compiled_graph()
         assert app is not None
     
-    def test_graph_invocation_without_token(self):
+    @pytest.mark.asyncio
+    async def test_graph_invocation_without_token(self):
         """Test that graph handles missing API token gracefully"""
-        app = get_compiled_graph()
+        # 确保 APIFY_API_TOKEN 不存在
+        original_token = os.environ.pop("APIFY_API_TOKEN", None)
         
-        initial_state: GraphState = {
-            "query": "python developer sydney",
-            "job_listings": [],
-            "analysis_results": [],
-            "errors": []
-        }
-        
-        # 在没有 API token 的情况下，应该返回错误而不是崩溃
-        result = app.invoke(initial_state)
-        
-        assert "query" in result
-        assert result["query"] == "python developer sydney"
-        assert "errors" in result
-        # 应该有错误信息说明 API token 未设置
-        assert len(result["errors"]) > 0
+        try:
+            app = get_compiled_graph()
+            
+            initial_state: GraphState = {
+                "query": "python developer sydney",
+                "job_listings": [],
+                "analysis_results": [],
+                "errors": []
+            }
+            
+            # 在没有 API token 的情况下，应该返回错误而不是崩溃
+            # 使用 ainvoke 因为 job_fetcher_node 是异步函数
+            result = await app.ainvoke(initial_state)
+            
+            assert "query" in result
+            assert result["query"] == "python developer sydney"
+            assert "errors" in result
+            # 应该有错误信息说明 API token 未设置
+            assert len(result["errors"]) > 0
+        finally:
+            # 恢复原始 token
+            if original_token:
+                os.environ["APIFY_API_TOKEN"] = original_token
     
-    def test_graph_invocation_with_mocked_apify(self):
+    @pytest.mark.asyncio
+    async def test_graph_invocation_with_mocked_apify(self):
         """Test that graph can be invoked with mocked Apify client"""
         import httpx
         
@@ -84,7 +97,8 @@ class TestGraphStructure:
         with patch.dict("os.environ", {"APIFY_API_TOKEN": "test-token"}):
             with patch("services.apify_client.httpx.AsyncClient", return_value=mock_http_client):
                 with patch("asyncio.sleep", new_callable=AsyncMock):
-                    result = app.invoke(initial_state)
+                    # 使用 ainvoke 因为 job_fetcher_node 是异步函数
+                    result = await app.ainvoke(initial_state)
         
         assert "query" in result
         assert "report" in result

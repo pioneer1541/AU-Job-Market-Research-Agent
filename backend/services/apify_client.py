@@ -7,6 +7,7 @@ import os
 import asyncio
 import logging
 import json
+import re
 from typing import Optional, Any, TypedDict
 from datetime import datetime
 
@@ -37,6 +38,56 @@ class ApifyError(Exception):
 class ApifyRateLimitError(ApifyError):
     """API 速率限制错误"""
     pass
+
+
+def clean_salary(salary: str | None) -> str | None:
+    """
+    清洗薪资字段，提取标准格式
+    
+    支持格式:
+    - $xxx 或 $xxxk
+    - $xxx - $xxx 或 $xxxk - $xxxk
+    - $xxx to $xxx
+    
+    如果薪资字段包含换行或过长，返回 None
+    
+    Args:
+        salary: 原始薪资字符串
+        
+    Returns:
+        清洗后的薪资格式字符串，或 None
+    """
+    if not salary:
+        return None
+    
+    # 如果包含换行符，说明格式混乱，返回 None
+    if "\n" in salary or "\r" in salary:
+        return None
+    
+    # 如果过长（超过50字符），可能包含其他信息，返回 None
+    if len(salary) > 50:
+        return None
+    
+    # 尝试匹配标准薪资格式
+    # 格式1: $xxx - $xxx 或 $xxxk - $xxxk
+    range_pattern = r"\$[\d,]+(?:k|K)?\s*(?:-|to|–)\s*\$?[\d,]+(?:k|K)?"
+    
+    # 格式2: $xxx 或 $xxxk (单个数字)
+    single_pattern = r"\$[\d,]+"
+    
+    # 优先匹配范围格式
+    range_match = re.search(range_pattern, salary, re.IGNORECASE)
+    if range_match:
+        return range_match.group(0).strip()
+    
+    # 其次匹配单个数字
+    single_match = re.search(single_pattern, salary)
+    if single_match:
+        return single_match.group(0).strip()
+    
+    # 如果都不匹配，返回 None
+    return None
+
 
 
 # Seek 搜索页面的 Page Function (在浏览器中执行)
@@ -417,12 +468,16 @@ class ApifyClient:
         if is_processed:
             # 已经是处理过的格式
             job_id = str(raw_job.get("id", ""))
+            # 清洗薪资字段
+            raw_salary = raw_job.get("salary")
+            salary = clean_salary(raw_salary)
+            
             return JobListing(
                 id=job_id,
                 title=raw_job.get("title", "Untitled"),
                 company=raw_job.get("company", "Unknown"),
                 location=raw_job.get("location", "Unknown"),
-                salary=raw_job.get("salary"),
+                salary=salary,
                 description=raw_job.get("description", "No description"),
                 url=raw_job.get("url") or f"https://www.seek.com.au/job/{job_id}",
                 source="seek",
@@ -469,12 +524,16 @@ class ApifyClient:
         job_id = str(raw_job.get("id", ""))
         url = raw_job.get("url") or f"https://www.seek.com.au/job/{job_id}"
         
+        # 清洗薪资字段
+        raw_salary = raw_job.get("salary")
+        salary = clean_salary(raw_salary)
+        
         return JobListing(
             id=job_id,
             title=raw_job.get("title", "Untitled"),
             company=company,
             location=raw_job.get("location", "Unknown"),
-            salary=raw_job.get("salary"),
+            salary=salary,
             description=description,
             url=url,
             source="seek",

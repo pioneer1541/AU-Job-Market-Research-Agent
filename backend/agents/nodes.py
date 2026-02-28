@@ -40,11 +40,13 @@ def coordinator_node(state: GraphState) -> dict:
     }
 
 
-def job_fetcher_node(state: GraphState) -> dict:
+async def job_fetcher_node(state: GraphState) -> dict:
     """
     Job fetcher node: Collects job listings from multiple sources.
     
     Uses Apify API to scrape Seek, Indeed, etc.
+    
+    修复: 改为原生异步函数，移除 asyncio.run()
     """
     query = state["query"]
     errors = []
@@ -60,17 +62,15 @@ def job_fetcher_node(state: GraphState) -> dict:
     
     try:
         # 使用 Apify Seek Scraper 获取数据
-        async def fetch_jobs():
-            async with ApifyClient() as client:
-                raw_jobs = await client.run_seek_scraper(
-                    search_query=search_query,
-                    location=location,
-                    max_items=50
-                )
-                return [ApifyClient.parse_to_job_listing(job) for job in raw_jobs]
+        # 修复: 直接使用 await，不再使用 asyncio.run()
+        async with ApifyClient() as client:
+            raw_jobs = await client.run_seek_scraper(
+                search_query=search_query,
+                location=location,
+                max_items=50
+            )
+            jobs = [ApifyClient.parse_to_job_listing(job) for job in raw_jobs]
         
-        # 运行异步任务
-        jobs = asyncio.run(fetch_jobs())
         logger.info(f"成功获取 {len(jobs)} 条职位数据")
         
     except ApifyError as e:
@@ -83,10 +83,21 @@ def job_fetcher_node(state: GraphState) -> dict:
         logger.exception(error_msg)
         errors.append(error_msg)
     
+    # 基于 job_id 去重
+    seen_ids = set()
+    unique_jobs = []
+    for job in jobs:
+        if job["id"] not in seen_ids:
+            seen_ids.add(job["id"])
+            unique_jobs.append(job)
+    
+    if len(jobs) != len(unique_jobs):
+        logger.info(f"去重: {len(jobs)} -> {len(unique_jobs)} 条职位数据")
+    
     return {
-        "job_listings": jobs,
+        "job_listings": unique_jobs,
         "errors": errors,
-        "next_action": "process_data" if jobs else "END"
+        "next_action": "process_data" if unique_jobs else "END"
     }
 
 

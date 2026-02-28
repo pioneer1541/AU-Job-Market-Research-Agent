@@ -92,7 +92,7 @@ class TestApifyClient:
         assert result["title"] == "Senior Python Developer"
         assert result["company"] == "Tech Corp"  # companyProfile 优先
         assert result["location"] == "Melbourne VIC"
-        assert result["salary"] == "$150k - $180k + super"
+        assert result["salary"] == "$150k - $180k"  # 清洗后只保留核心薪资格式
         assert result["source"] == "seek"
         assert result["posted_date"] == "2026-03-01T00:00:00Z"
         assert "Python" in result["description"]
