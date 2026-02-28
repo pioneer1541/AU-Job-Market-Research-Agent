@@ -6,16 +6,22 @@ import asyncio
 from typing import Literal
 
 try:
-    from .state import GraphState, JobListing as StateJobListing
+    from .state import GraphState, JobListing as StateJobListing, AnalysisResult
 except ImportError:
     # 测试环境下的导入
-    from state import GraphState, JobListing as StateJobListing
+    from state import GraphState, JobListing as StateJobListing, AnalysisResult
 
 try:
     from ..services.apify_client import ApifyClient, ApifyError, JobListing
 except ImportError:
     # 测试环境下的导入
     from services.apify_client import ApifyClient, ApifyError, JobListing
+
+try:
+    from ..services.jd_analyzer import analyze_jobs_batch
+except ImportError:
+    # 测试环境下的导入
+    from services.jd_analyzer import analyze_jobs_batch
 
 
 logger = logging.getLogger(__name__)
@@ -124,29 +130,83 @@ def data_processor_node(state: GraphState) -> dict:
     }
 
 
-def market_analyzer_node(state: GraphState) -> dict:
+async def market_analyzer_node(state: GraphState) -> dict:
     """
     Market analyzer node: Performs statistical analysis on job data.
+    
+    使用 LLM 分析职位描述，提取技能、经验级别等信息。
     """
     processed_data = state.get("processed_data", {})
     jobs = state.get("job_listings", [])
+    errors = state.get("errors", [])
     
-    # TODO: Implement analysis
-    # 1. Skill frequency analysis
-    # 2. Salary distribution
-    # 3. Location distribution
-    # 4. Experience level distribution
+    analysis_results: list[AnalysisResult] = []
     
-    market_insights = {
-        "top_skills": [],
-        "avg_salary": None,
-        "salary_range": {},
-        "top_locations": [],
-    }
+    if jobs:
+        try:
+            logger.info(f"开始分析 {len(jobs)} 个职位...")
+            analysis_results = await analyze_jobs_batch(jobs, batch_size=5)
+            logger.info(f"完成 {len(analysis_results)} 个职位的分析")
+        except Exception as e:
+            error_msg = f"职位分析失败: {e}"
+            logger.exception(error_msg)
+            errors.append(error_msg)
+    
+    # 聚合分析结果
+    market_insights = _aggregate_insights(analysis_results, jobs)
     
     return {
+        "analysis_results": analysis_results,
         "market_insights": market_insights,
+        "errors": errors,
         "next_action": "generate_report"
+    }
+
+
+def _aggregate_insights(
+    analysis_results: list[AnalysisResult],
+    jobs: list[JobListing],
+) -> dict:
+    """
+    聚合多个职位的分析结果，生成市场洞察。
+    """
+    from collections import Counter
+    
+    if not analysis_results:
+        return {
+            "top_skills": [],
+            "experience_distribution": {},
+            "avg_salary": None,
+            "salary_range": {},
+            "top_locations": [],
+            "industry_distribution": {},
+        }
+    
+    # 技能频率统计
+    all_skills = []
+    for result in analysis_results:
+        all_skills.extend(result.get("skills_required", []))
+    skill_counts = Counter(all_skills)
+    top_skills = [{"skill": skill, "count": count} for skill, count in skill_counts.most_common(10)]
+    
+    # 经验级别分布
+    exp_counts = Counter(r.get("experience_level", "Unknown") for r in analysis_results)
+    experience_distribution = dict(exp_counts)
+    
+    # 行业分布
+    industry_counts = Counter(r.get("industry") for r in analysis_results if r.get("industry"))
+    industry_distribution = dict(industry_counts)
+    
+    # 地点分布（从原始职位数据）
+    location_counts = Counter(job.get("location", "Unknown") for job in jobs)
+    top_locations = [{"location": loc, "count": count} for loc, count in location_counts.most_common(5)]
+    
+    return {
+        "top_skills": top_skills,
+        "experience_distribution": experience_distribution,
+        "industry_distribution": industry_distribution,
+        "top_locations": top_locations,
+        "total_analyzed": len(analysis_results),
     }
 
 
@@ -156,28 +216,49 @@ def report_generator_node(state: GraphState) -> dict:
     """
     market_insights = state.get("market_insights", {})
     processed_data = state.get("processed_data", {})
+    analysis_results = state.get("analysis_results", [])
     jobs = state.get("job_listings", [])
     
-    # TODO: Use LLM to generate comprehensive report
+    # 生成报告
+    report_sections = [
+        f"# Job Market Research Report\n",
+        f"\n## Query: {state.get('query', 'N/A')}\n",
+        f"\n## Summary\n",
+        f"- Total Jobs Analyzed: {processed_data.get('total_jobs', 0)}",
+        f"- Jobs with Analysis: {len(analysis_results)}\n",
+    ]
     
-    report = f"""
-# Job Market Research Report
-
-## Query: {state.get("query", "N/A")}
-
-## Summary
-- Total Jobs Analyzed: {processed_data.get("total_jobs", 0)}
-- Unique Companies: {processed_data.get("unique_companies", 0)}
-
-## Top Skills
-(To be implemented)
-
-## Salary Analysis
-(To be implemented)
-
-## Recommendations
-(To be implemented)
-"""
+    # Top Skills
+    top_skills = market_insights.get("top_skills", [])
+    if top_skills:
+        report_sections.append("\n## Top Skills\n")
+        for item in top_skills:
+            report_sections.append(f"- {item['skill']}: {item['count']} mentions\n")
+    
+    # Experience Distribution
+    exp_dist = market_insights.get("experience_distribution", {})
+    if exp_dist:
+        report_sections.append("\n## Experience Level Distribution\n")
+        for level, count in sorted(exp_dist.items(), key=lambda x: -x[1]):
+            report_sections.append(f"- {level}: {count} positions\n")
+    
+    # Industry Distribution
+    industry_dist = market_insights.get("industry_distribution", {})
+    if industry_dist:
+        report_sections.append("\n## Industry Distribution\n")
+        for industry, count in sorted(industry_dist.items(), key=lambda x: -x[1])[:5]:
+            report_sections.append(f"- {industry}: {count} positions\n")
+    
+    # Top Locations
+    top_locations = market_insights.get("top_locations", [])
+    if top_locations:
+        report_sections.append("\n## Top Locations\n")
+        for item in top_locations:
+            report_sections.append(f"- {item['location']}: {item['count']} positions\n")
+    
+    # TODO: Use LLM to generate recommendations and insights
+    
+    report = "".join(report_sections)
     
     return {
         "report": report,
