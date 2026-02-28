@@ -3,7 +3,8 @@ LangGraph Node Definitions
 """
 import logging
 import asyncio
-from typing import Literal
+import re
+from typing import Literal, Optional, Tuple
 
 try:
     from .state import GraphState, JobListing as StateJobListing, AnalysisResult
@@ -152,7 +153,7 @@ async def market_analyzer_node(state: GraphState) -> dict:
             logger.exception(error_msg)
             errors.append(error_msg)
     
-    # 聚合分析结果
+    # 聚合分析结果（包含薪资统计）
     market_insights = _aggregate_insights(analysis_results, jobs)
     
     return {
@@ -163,12 +164,62 @@ async def market_analyzer_node(state: GraphState) -> dict:
     }
 
 
+def parse_salary_range(salary_str: Optional[str]) -> Optional[Tuple[float, float, str]]:
+    """
+    解析薪资范围字符串，返回 (min, max, currency) 或 None。
+    
+    支持格式:
+    - "$120,000 - $150,000"
+    - "$100k - $120k"
+    - "100000-150000 AUD/year"
+    - "$80k+"
+    - "120000-150000 AUD/year"
+    """
+    if not salary_str:
+        return None
+    
+    # 统一处理
+    s = salary_str.lower().replace(',', '').replace(' ', '')
+    
+    # 检测货币
+    currency = 'AUD'  # 默认澳元（澳洲市场）
+    if 'usd' in s:
+        currency = 'USD'
+    elif 'gbp' in s:
+        currency = 'GBP'
+    
+    # 匹配 k 后缀 (如 100k)
+    k_pattern = r'(\d+)k'
+    k_matches = re.findall(k_pattern, s)
+    if k_matches:
+        nums = [float(m) * 1000 for m in k_matches]
+        if len(nums) >= 2:
+            return (min(nums), max(nums), currency)
+        elif len(nums) == 1:
+            return (nums[0], nums[0], currency)
+    
+    # 匹配普通数字（薪资通常 >= 30000）
+    num_pattern = r'(\d+(?:\.\d+)?)'
+    nums = [float(m) for m in re.findall(num_pattern, s)]
+    
+    # 过滤掉年份等干扰数字（薪资应该 >= 30000）
+    nums = [n for n in nums if n >= 30000]
+    
+    if len(nums) >= 2:
+        return (min(nums), max(nums), currency)
+    elif len(nums) == 1:
+        return (nums[0], nums[0], currency)
+    
+    return None
+
+
 def _aggregate_insights(
-    analysis_results: list[AnalysisResult],
-    jobs: list[JobListing],
+    analysis_results: list[dict],
+    jobs: list[dict],
 ) -> dict:
     """
     聚合多个职位的分析结果，生成市场洞察。
+    包含薪资统计功能。
     """
     from collections import Counter
     
@@ -180,6 +231,7 @@ def _aggregate_insights(
             "salary_range": {},
             "top_locations": [],
             "industry_distribution": {},
+            "total_analyzed": 0,
         }
     
     # 技能频率统计
@@ -201,18 +253,101 @@ def _aggregate_insights(
     location_counts = Counter(job.get("location", "Unknown") for job in jobs)
     top_locations = [{"location": loc, "count": count} for loc, count in location_counts.most_common(5)]
     
+    # 薪资统计 - 新增功能
+    salaries = []
+    salary_by_experience = {"Junior": [], "Mid": [], "Senior": [], "Lead": [], "Unknown": []}
+    salary_by_industry = {}
+    
+    for result in analysis_results:
+        salary_str = result.get("salary_estimate")
+        parsed = parse_salary_range(salary_str)
+        if parsed:
+            min_sal, max_sal, currency = parsed
+            # 使用薪资范围的中间值
+            mid_salary = (min_sal + max_sal) / 2
+            salaries.append({
+                "min": min_sal,
+                "max": max_sal,
+                "mid": mid_salary,
+                "currency": currency,
+            })
+            
+            # 按经验级别分组
+            exp_level = result.get("experience_level", "Unknown")
+            if exp_level in salary_by_experience:
+                salary_by_experience[exp_level].append(mid_salary)
+            else:
+                salary_by_experience["Unknown"].append(mid_salary)
+            
+            # 按行业分组
+            industry = result.get("industry", "Unknown")
+            if industry:
+                if industry not in salary_by_industry:
+                    salary_by_industry[industry] = []
+                salary_by_industry[industry].append(mid_salary)
+    
+    # 计算薪资统计
+    salary_stats = None
+    if salaries:
+        all_mids = [s["mid"] for s in salaries]
+        avg_salary = sum(all_mids) / len(all_mids)
+        min_salary = min(s["min"] for s in salaries)
+        max_salary = max(s["max"] for s in salaries)
+        
+        salary_stats = {
+            "average": round(avg_salary, 0),
+            "min": round(min_salary, 0),
+            "max": round(max_salary, 0),
+            "count": len(salaries),
+            "currency": salaries[0]["currency"] if salaries else "AUD",
+        }
+        
+        # 按经验级别的薪资统计
+        salary_by_exp_stats = {}
+        for exp, vals in salary_by_experience.items():
+            if vals:
+                salary_by_exp_stats[exp] = {
+                    "average": round(sum(vals) / len(vals), 0),
+                    "min": round(min(vals), 0),
+                    "max": round(max(vals), 0),
+                    "count": len(vals),
+                }
+        
+        # 按行业的薪资统计
+        salary_by_ind_stats = {}
+        for industry, vals in salary_by_industry.items():
+            if vals and len(vals) >= 2:  # 至少2个样本才统计
+                salary_by_ind_stats[industry] = {
+                    "average": round(sum(vals) / len(vals), 0),
+                    "min": round(min(vals), 0),
+                    "max": round(max(vals), 0),
+                    "count": len(vals),
+                }
+        
+        salary_stats["by_experience"] = salary_by_exp_stats
+        salary_stats["by_industry"] = salary_by_ind_stats
+    
     return {
         "top_skills": top_skills,
         "experience_distribution": experience_distribution,
         "industry_distribution": industry_distribution,
         "top_locations": top_locations,
         "total_analyzed": len(analysis_results),
+        "salary_stats": salary_stats,  # 新增薪资统计
     }
+
+
+def format_salary(value: float, currency: str = "AUD") -> str:
+    """格式化薪资数字为可读字符串"""
+    if value >= 1000:
+        return f"{currency} {value/1000:.0f}k"
+    return f"{currency} {value:.0f}"
 
 
 def report_generator_node(state: GraphState) -> dict:
     """
     Report generator node: Creates final market research report.
+    包含薪资分析章节。
     """
     market_insights = state.get("market_insights", {})
     processed_data = state.get("processed_data", {})
@@ -241,6 +376,52 @@ def report_generator_node(state: GraphState) -> dict:
         report_sections.append("\n## Experience Level Distribution\n")
         for level, count in sorted(exp_dist.items(), key=lambda x: -x[1]):
             report_sections.append(f"- {level}: {count} positions\n")
+    
+    # Salary Analysis - 新增章节
+    salary_stats = market_insights.get("salary_stats")
+    if salary_stats:
+        report_sections.append("\n## Salary Analysis\n")
+        currency = salary_stats.get("currency", "AUD")
+        
+        # 总体薪资统计
+        avg = salary_stats.get("average", 0)
+        min_sal = salary_stats.get("min", 0)
+        max_sal = salary_stats.get("max", 0)
+        count = salary_stats.get("count", 0)
+        
+        report_sections.append(f"\n### Overall Salary Range\n")
+        report_sections.append(f"- **Average Salary**: {format_salary(avg, currency)}\n")
+        report_sections.append(f"- **Salary Range**: {format_salary(min_sal, currency)} - {format_salary(max_sal, currency)}\n")
+        report_sections.append(f"- **Based on**: {count} job listings with salary data\n")
+        
+        # 按经验级别的薪资
+        by_exp = salary_stats.get("by_experience", {})
+        if by_exp:
+            report_sections.append(f"\n### Salary by Experience Level\n")
+            # 按平均薪资排序
+            sorted_exp = sorted(by_exp.items(), key=lambda x: x[1].get("average", 0), reverse=True)
+            for exp, stats in sorted_exp:
+                if stats.get("count", 0) > 0:
+                    report_sections.append(
+                        f"- **{exp}**: {format_salary(stats['average'], currency)} " 
+                        f"(range: {format_salary(stats['min'], currency)} - {format_salary(stats['max'], currency)}, " 
+                        f"n={stats['count']})\n"
+                    )
+        
+        # 按行业的薪资
+        by_ind = salary_stats.get("by_industry", {})
+        if by_ind:
+            report_sections.append(f"\n### Salary by Industry\n")
+            sorted_ind = sorted(by_ind.items(), key=lambda x: x[1].get("average", 0), reverse=True)
+            for industry, stats in sorted_ind[:5]:  # 只显示前5个行业
+                report_sections.append(
+                    f"- **{industry}**: {format_salary(stats['average'], currency)} " 
+                    f"(range: {format_salary(stats['min'], currency)} - {format_salary(stats['max'], currency)}, " 
+                    f"n={stats['count']})\n"
+                )
+    else:
+        report_sections.append("\n## Salary Analysis\n")
+        report_sections.append("\n*No salary data available for analysis.*\n")
     
     # Industry Distribution
     industry_dist = market_insights.get("industry_distribution", {})

@@ -333,3 +333,124 @@ class TestNodesIntegration:
             assert len(result["analysis_results"]) == 1
             assert "market_insights" in result
             assert "top_skills" in result["market_insights"]
+
+
+class TestSalaryParsing:
+    """Tests for salary parsing functionality"""
+    
+    def test_parse_salary_range_with_dollars(self):
+        """Test parsing salary with dollar signs"""
+        from backend.agents.nodes import parse_salary_range
+        
+        result = parse_salary_range("$120,000 - $150,000")
+        assert result is not None
+        assert result[0] == 120000.0
+        assert result[1] == 150000.0
+        assert result[2] == "AUD"
+    
+    def test_parse_salary_range_with_k_suffix(self):
+        """Test parsing salary with k suffix"""
+        from backend.agents.nodes import parse_salary_range
+        
+        result = parse_salary_range("$100k - $120k")
+        assert result is not None
+        assert result[0] == 100000.0
+        assert result[1] == 120000.0
+    
+    def test_parse_salary_range_with_currency(self):
+        """Test parsing salary with explicit currency"""
+        from backend.agents.nodes import parse_salary_range
+        
+        result = parse_salary_range("120000-150000 AUD/year")
+        assert result is not None
+        assert result[0] == 120000.0
+        assert result[1] == 150000.0
+        assert result[2] == "AUD"
+    
+    def test_parse_salary_range_with_usd(self):
+        """Test parsing salary with USD currency"""
+        from backend.agents.nodes import parse_salary_range
+        
+        result = parse_salary_range("$80,000 USD")
+        assert result is not None
+        assert result[0] == 80000.0
+        assert result[1] == 80000.0
+        assert result[2] == "USD"
+    
+    def test_parse_salary_range_none(self):
+        """Test parsing None returns None"""
+        from backend.agents.nodes import parse_salary_range
+        
+        assert parse_salary_range(None) is None
+        assert parse_salary_range("") is None
+    
+    def test_aggregate_insights_with_salaries(self):
+        """Test salary aggregation in insights"""
+        from backend.agents.nodes import _aggregate_insights
+        
+        analysis_results = [
+            {
+                "job_id": "job-1",
+                "skills_required": ["Python"],
+                "experience_level": "Senior",
+                "salary_estimate": "$120,000 - $150,000",
+                "key_requirements": [],
+                "industry": "Tech"
+            },
+            {
+                "job_id": "job-2",
+                "skills_required": ["Java"],
+                "experience_level": "Junior",
+                "salary_estimate": "$60k - $80k",
+                "key_requirements": [],
+                "industry": "Tech"
+            },
+        ]
+        jobs = [
+            {"id": "job-1", "location": "Melbourne"},
+            {"id": "job-2", "location": "Sydney"},
+        ]
+        
+        result = _aggregate_insights(analysis_results, jobs)
+        
+        assert "salary_stats" in result
+        assert result["salary_stats"] is not None
+        assert result["salary_stats"]["count"] == 2
+        assert "average" in result["salary_stats"]
+        assert "by_experience" in result["salary_stats"]
+    
+    def test_report_includes_salary_section(self):
+        """Test that report generator includes salary analysis"""
+        from backend.agents.nodes import report_generator_node
+        
+        state = {
+            "query": "python developer melbourne",
+            "job_listings": [{"id": "job-1", "location": "Melbourne"}],
+            "analysis_results": [],
+            "processed_data": {"total_jobs": 1},
+            "market_insights": {
+                "top_skills": [],
+                "experience_distribution": {},
+                "top_locations": [],
+                "salary_stats": {
+                    "average": 135000.0,
+                    "min": 120000.0,
+                    "max": 150000.0,
+                    "count": 3,
+                    "currency": "AUD",
+                    "by_experience": {
+                        "Senior": {"average": 145000.0, "min": 140000.0, "max": 150000.0, "count": 2},
+                        "Mid": {"average": 125000.0, "min": 120000.0, "max": 130000.0, "count": 1}
+                    }
+                }
+            },
+            "errors": [],
+        }
+        
+        result = report_generator_node(state)
+        report = result["report"]
+        
+        assert "## Salary Analysis" in report
+        assert "Average Salary" in report
+        assert "135k" in report  # 135000 formatted as 135k
+        assert "Experience Level" in report
