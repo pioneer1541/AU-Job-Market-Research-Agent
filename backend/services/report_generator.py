@@ -223,6 +223,18 @@ def _fmt_int(value: Optional[float]) -> str:
     return f"{int(round(value)):,}"
 
 
+def _display_text(value: Any, fallback: str = "暂无数据") -> str:
+    """将空值统一转换为可展示文本，避免报告出现 None。"""
+    if value is None:
+        return fallback
+    text = str(value).strip()
+    if not text:
+        return fallback
+    if text.lower() in {"none", "unknown", "n/a", "null"}:
+        return fallback
+    return text
+
+
 class ReportGenerator:
     """按照 A-G 结构生成报告。"""
 
@@ -482,10 +494,20 @@ class ReportGenerator:
         for band, raw_count in bands.items():
             count = ReportGenerator._coerce_number(raw_count)
             if count > 0:
-                # 统一使用中文标签，保证 HTML 与测试断言一致。
-                labels.append(f"薪资区间 {band}")
+                # 统一输出中文薪资分段，避免图表标签出现英文区间。
+                labels.append(ReportGenerator._to_salary_band_label(str(band)))
                 values.append(count)
         return labels, values
+
+    @staticmethod
+    def _to_salary_band_label(band: str) -> str:
+        band_map = {
+            "<100k": "10万以下",
+            "100k-150k": "10万-15万",
+            "150k-200k": "15万-20万",
+            ">=200k": "20万及以上",
+        }
+        return band_map.get(band, band)
 
     @staticmethod
     def _extract_top_skills_data(market_insights: dict[str, Any], limit: int = 10) -> tuple[list[str], list[float]]:
@@ -716,7 +738,7 @@ class ReportGenerator:
             f"- 城市/地点数: {_fmt_int(sample.get('unique_locations'))}\n"
             f"- 薪资覆盖率: {sample.get('salary_coverage_pct', 0)}%\n"
             f"- 分析覆盖率: {sample.get('analysis_coverage_pct', 0)}%\n"
-            f"- 日期范围: {sample.get('date_range', {}).get('start', 'N/A')} ~ {sample.get('date_range', {}).get('end', 'N/A')}\n"
+            f"- 日期范围: {_display_text(sample.get('date_range', {}).get('start'))} ~ {_display_text(sample.get('date_range', {}).get('end'))}\n"
             f"{filter_lines}"
         )
 
@@ -727,7 +749,7 @@ class ReportGenerator:
         ) or "  - 暂无有效发布日期数据"
         sections["C"] = (
             "## C. 需求侧分析\n"
-            f"- 趋势方向: {trend.get('trend', 'unknown')}\n"
+            f"- 趋势方向: {_display_text(trend.get('trend'))}\n"
             f"- 日均职位量: {trend.get('avg_daily_postings', 0)}\n"
             "- 近期职位量序列:\n"
             f"{trend_lines}\n"

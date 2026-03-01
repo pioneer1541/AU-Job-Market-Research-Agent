@@ -402,8 +402,9 @@ class StatisticsService:
 
         dated = [_to_date(j.get("posted_date")) for j in jobs]
         dated = [d for d in dated if d]
-        date_min = min(dated).isoformat() if dated else None
-        date_max = max(dated).isoformat() if dated else None
+        # 没有有效发布日期时统一回填“暂无数据”，避免报告层出现 "None ~ None"。
+        date_min = min(dated).isoformat() if dated else "暂无数据"
+        date_max = max(dated).isoformat() if dated else "暂无数据"
 
         salary_count = sum(1 for j in jobs if parse_salary_text(j.get("salary")))
         salary_coverage = round(_safe_div(salary_count, max(total_jobs, 1)) * 100, 2)
@@ -426,7 +427,8 @@ class StatisticsService:
                 day_counter[d.isoformat()] += 1
 
         if not day_counter:
-            return {"series": [], "trend": "unknown", "avg_daily_postings": 0}
+            # 无样本日期时返回可直接展示的中文占位值。
+            return {"series": [], "trend": "暂无数据", "avg_daily_postings": 0}
 
         series = [{"date": d, "count": c} for d, c in sorted(day_counter.items())]
         counts = [point["count"] for point in series]

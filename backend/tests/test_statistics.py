@@ -113,6 +113,31 @@ class TestStatisticsService:
         assert overview["unique_locations"] == 3
         assert overview["salary_coverage_pct"] > 60
         assert overview["analysis_coverage_pct"] == 100.0
+        assert overview["date_range"]["start"] == "2026-02-20"
+        assert overview["date_range"]["end"] == "2026-02-22"
+
+    def test_compute_sample_overview_with_empty_dates(self):
+        service = StatisticsService()
+        jobs = [
+            {"id": "j1", "posted_date": None},
+            {"id": "j2", "posted_date": ""},
+            {"id": "j3", "posted_date": "invalid-date"},
+        ]
+
+        overview = service.compute_sample_overview(jobs, analysis_results=[])
+
+        assert overview["date_range"]["start"] == "暂无数据"
+        assert overview["date_range"]["end"] == "暂无数据"
+
+    def test_analyze_job_volume_trend_with_empty_dates(self):
+        service = StatisticsService()
+        jobs = [{"id": "j1", "posted_date": None}, {"id": "j2", "posted_date": ""}]
+
+        trend = service.analyze_job_volume_trend(jobs)
+
+        assert trend["series"] == []
+        assert trend["trend"] == "暂无数据"
+        assert trend["avg_daily_postings"] == 0
 
     def test_analyze_salary(self):
         service = StatisticsService()
@@ -296,6 +321,14 @@ class TestReportGenerator:
         assert "薪资最高 TOP3" in report
         assert generated["report_meta"]["section_order"] == ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
 
+    def test_extract_salary_band_data_uses_chinese_labels(self):
+        labels, values = ReportGenerator._extract_salary_band_data(
+            {"salary_analysis": {"bands": {"<100k": 2, "100k-150k": 3, "150k-200k": 1, ">=200k": 4}}}
+        )
+
+        assert labels == ["10万以下", "10万-15万", "15万-20万", "20万及以上"]
+        assert values == [2.0, 3.0, 1.0, 4.0]
+
     @pytest.mark.skipif(not HAS_JINJA2, reason="Jinja2 不可用时无法验证内联模板渲染。")
     def test_render_pdf_html_fallback_contains_table_and_chart_data_when_no_template_env(self):
         generator = ReportGenerator()
@@ -321,7 +354,7 @@ class TestReportGenerator:
         assert "关键数据概览" in html
         assert "薪资范围分布" in html
         assert "技能要求 Top10 分布" in html
-        assert "薪资区间 100k-150k" in html
+        assert "10万-15万" in html
         assert "Python" in html
 
     @pytest.mark.skipif(not HAS_JINJA2, reason="Jinja2 不可用时无法验证模板异常兜底。")

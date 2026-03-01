@@ -26,6 +26,14 @@
       line-height: 1.7;
       margin: 0;
       padding: 0;
+      background: #f8fafc;
+    }
+
+    .report-shell {
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 10mm 9mm;
     }
 
     .cover-title {
@@ -113,10 +121,12 @@
       border: 1px solid #e5e7eb;
       padding: 4px;
       background: #ffffff;
+      margin-bottom: 2mm;
     }
   </style>
 </head>
 <body>
+  <div class="report-shell">
   <h1 class="cover-title">{{ report_title }}</h1>
   <div class="meta">生成时间：{{ generated_at }}</div>
 
@@ -139,18 +149,40 @@
   </table>
 
   <div class="charts">
-    {% if salary_chart_base64 %}
     <div class="chart-block">
-      <div class="chart-title">Salary Range</div>
-      <img class="chart-image" src="data:image/png;base64,{{ salary_chart_base64 }}" alt="Salary Range Pie Chart">
+      <div class="chart-title">薪资范围分布</div>
+      {% if salary_chart_base64 %}
+      <img class="chart-image" src="data:image/png;base64,{{ salary_chart_base64 }}" alt="薪资范围分布饼图">
+      {% endif %}
+      <table>
+        <thead><tr><th>区间</th><th>数量</th></tr></thead>
+        <tbody>
+          {% for row in salary_chart_rows %}
+          <tr><td>{{ row.label }}</td><td>{{ row.value }}</td></tr>
+          {% endfor %}
+          {% if not salary_chart_rows %}
+          <tr><td colspan="2">暂无薪资分布数据</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
     </div>
-    {% endif %}
-    {% if skills_chart_base64 %}
     <div class="chart-block">
-      <div class="chart-title">Skills Top10</div>
-      <img class="chart-image" src="data:image/png;base64,{{ skills_chart_base64 }}" alt="Skills Top10 Pie Chart">
+      <div class="chart-title">技能要求 Top10 分布</div>
+      {% if skills_chart_base64 %}
+      <img class="chart-image" src="data:image/png;base64,{{ skills_chart_base64 }}" alt="技能要求 Top10 分布饼图">
+      {% endif %}
+      <table>
+        <thead><tr><th>技能</th><th>数量</th></tr></thead>
+        <tbody>
+          {% for row in skills_chart_rows %}
+          <tr><td>{{ row.label }}</td><td>{{ row.value }}</td></tr>
+          {% endfor %}
+          {% if not skills_chart_rows %}
+          <tr><td colspan="2">暂无技能分布数据</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
     </div>
-    {% endif %}
   </div>
 
   {% for section in sections %}
@@ -167,5 +199,6 @@
       {% endif %}
     {% endfor %}
   {% endfor %}
+  </div>
 </body>
 </html>
