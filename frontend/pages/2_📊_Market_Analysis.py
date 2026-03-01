@@ -66,6 +66,52 @@ def build_skill_counts(skills: List[str]) -> Dict[str, int]:
     return dict(Counter(skills))
 
 
+def ranked_items_to_df(items: Any, label_col: str, top_n: int = 10) -> pd.DataFrame:
+    """将 [{'item': 'xxx', 'count': n}] 结构转换为图表数据。"""
+    if not isinstance(items, list):
+        return pd.DataFrame()
+
+    rows: List[Dict[str, Any]] = []
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get("item", "")).strip()
+        if not label:
+            continue
+        try:
+            count = int(entry.get("count", 0))
+        except (TypeError, ValueError):
+            continue
+        rows.append({label_col: label, "数量": count})
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows).sort_values("数量", ascending=False).head(top_n)
+
+
+def distribution_to_df(distribution: Any, label_col: str) -> pd.DataFrame:
+    """将分布字典转换为图表数据。"""
+    if not isinstance(distribution, dict):
+        return pd.DataFrame()
+
+    rows: List[Dict[str, Any]] = []
+    for key, value in distribution.items():
+        label = str(key).strip()
+        if not label:
+            continue
+        try:
+            count = int(value)
+        except (TypeError, ValueError):
+            continue
+        rows.append({label_col: label, "数量": count})
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows).sort_values("数量", ascending=False)
+
+
 def format_salary_range_from_analysis(salary_analysis: Dict[str, Any]) -> str:
     """优先使用后端结构化薪资分析字段。"""
     annual = salary_analysis.get("annual", {}) if isinstance(salary_analysis, dict) else {}
@@ -234,6 +280,7 @@ salary_analysis: Dict[str, Any] = market_insights.get("salary_analysis", {}) or 
 applicant_analysis: Dict[str, Any] = market_insights.get("applicant_analysis", {}) or {}
 competition_intensity: Dict[str, Any] = market_insights.get("competition_intensity", {}) or {}
 skill_profile: Dict[str, Any] = market_insights.get("skill_profile", {}) or {}
+deep_analysis: Dict[str, Any] = market_insights.get("deep_analysis", {}) or {}
 employer_profile: Dict[str, Any] = market_insights.get("employer_profile", {}) or {}
 top_jobs: Dict[str, Any] = market_insights.get("top_jobs", {}) or {}
 
@@ -470,6 +517,59 @@ with right_col:
             )
     else:
         st.info("暂无薪资数据。")
+
+# I. 深度分析展示区域
+render_section_title("I. 深度分析", "硬技能、软技能、关键词与任职要求的细粒度统计")
+
+# 将 deep_analysis 的不同字段标准化为 DataFrame，统一用于柱状图展示。
+hard_skills_df = ranked_items_to_df(deep_analysis.get("top_hard_skills", []), "硬技能")
+soft_skills_df = ranked_items_to_df(deep_analysis.get("top_soft_skills", []), "软技能")
+industry_keywords_df = ranked_items_to_df(deep_analysis.get("top_industry_keywords", []), "行业关键词")
+responsibility_df = ranked_items_to_df(deep_analysis.get("top_responsibility_themes", []), "职责主题")
+qualifications_df = ranked_items_to_df(deep_analysis.get("top_qualifications", []), "任职资格")
+years_dist_df = distribution_to_df(deep_analysis.get("years_of_experience_distribution", {}), "经验年限")
+
+i1, i2 = st.columns(2)
+with i1:
+    st.markdown("#### 硬技能 Top10")
+    if hard_skills_df.empty:
+        st.info("暂无硬技能数据。")
+    else:
+        st.bar_chart(hard_skills_df.set_index("硬技能"))
+with i2:
+    st.markdown("#### 软技能 Top10")
+    if soft_skills_df.empty:
+        st.info("暂无软技能数据。")
+    else:
+        st.bar_chart(soft_skills_df.set_index("软技能"))
+
+i3, i4 = st.columns(2)
+with i3:
+    st.markdown("#### 行业关键词 Top10")
+    if industry_keywords_df.empty:
+        st.info("暂无行业关键词数据。")
+    else:
+        st.bar_chart(industry_keywords_df.set_index("行业关键词"))
+with i4:
+    st.markdown("#### 职责主题 Top10")
+    if responsibility_df.empty:
+        st.info("暂无职责主题数据。")
+    else:
+        st.bar_chart(responsibility_df.set_index("职责主题"))
+
+i5, i6 = st.columns(2)
+with i5:
+    st.markdown("#### 任职资格 Top10")
+    if qualifications_df.empty:
+        st.info("暂无任职资格数据。")
+    else:
+        st.bar_chart(qualifications_df.set_index("任职资格"))
+with i6:
+    st.markdown("#### 经验年限分布")
+    if years_dist_df.empty:
+        st.info("暂无经验年限数据。")
+    else:
+        st.bar_chart(years_dist_df.set_index("经验年限"))
 
 with st.expander("查看完整分析报告（Markdown）", expanded=False):
     if report.strip():

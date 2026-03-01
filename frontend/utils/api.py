@@ -80,6 +80,65 @@ def _normalize_skills(raw_skills: Any) -> list[str]:
     return []
 
 
+def _normalize_ranked_items(raw: Any) -> list[Dict[str, Any]]:
+    """将 TopN 列表统一为 [{"item": str, "count": int}] 结构。"""
+    normalized: list[Dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return normalized
+
+    for entry in raw:
+        if isinstance(entry, dict):
+            label = _pick_first(entry, ["item", "name", "label", "keyword", "theme", "skill"])
+            count = _pick_first(entry, ["count", "value", "total", "jobs"], 0)
+            if not label:
+                continue
+            try:
+                normalized.append({"item": str(label).strip(), "count": int(count)})
+            except (TypeError, ValueError):
+                continue
+        elif entry:
+            normalized.append({"item": str(entry).strip(), "count": 1})
+    return [item for item in normalized if item.get("item")]
+
+
+def _normalize_deep_analysis(raw: Any) -> Dict[str, Any]:
+    """兼容后端不同字段命名，输出统一 deep_analysis 结构。"""
+    if not isinstance(raw, dict):
+        return {
+            "top_hard_skills": [],
+            "top_soft_skills": [],
+            "top_industry_keywords": [],
+            "top_responsibility_themes": [],
+            "top_qualifications": [],
+            "years_of_experience_distribution": {},
+        }
+
+    return {
+        "top_hard_skills": _normalize_ranked_items(
+            _pick_first(raw, ["top_hard_skills", "hard_skills", "hardSkills"], [])
+        ),
+        "top_soft_skills": _normalize_ranked_items(
+            _pick_first(raw, ["top_soft_skills", "soft_skills", "softSkills"], [])
+        ),
+        "top_industry_keywords": _normalize_ranked_items(
+            _pick_first(raw, ["top_industry_keywords", "industry_keywords", "industryKeywords"], [])
+        ),
+        "top_responsibility_themes": _normalize_ranked_items(
+            _pick_first(raw, ["top_responsibility_themes", "responsibility_themes", "responsibilityThemes"], [])
+        ),
+        "top_qualifications": _normalize_ranked_items(
+            _pick_first(raw, ["top_qualifications", "qualifications"], [])
+        ),
+        "years_of_experience_distribution": _to_count_dict(
+            _pick_first(
+                raw,
+                ["years_of_experience_distribution", "experience_years_distribution", "experienceDistribution"],
+                {},
+            )
+        ),
+    }
+
+
 def _extract_module_dict(market_insights: Dict[str, Any], key: str) -> Dict[str, Any]:
     value = market_insights.get(key, {})
     return value if isinstance(value, dict) else {}
@@ -105,6 +164,7 @@ def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     applicant_analysis = _extract_module_dict(market_insights, "applicant_analysis")
     competition_intensity = _extract_module_dict(market_insights, "competition_intensity")
     skill_profile = _extract_module_dict(market_insights, "skill_profile")
+    deep_analysis = _normalize_deep_analysis(_pick_first(market_insights, ["deep_analysis", "deepAnalysis"], {}))
     employer_profile = _extract_module_dict(market_insights, "employer_profile")
     top_jobs = _extract_module_dict(market_insights, "top_jobs")
 
@@ -189,6 +249,7 @@ def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "applicant_analysis": applicant_analysis,
         "competition_intensity": competition_intensity,
         "skill_profile": skill_profile,
+        "deep_analysis": deep_analysis,
         "employer_profile": employer_profile,
         "top_jobs": top_jobs,
         "report_meta": _extract_module_dict(market_insights, "report_meta"),
