@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 import os
 import re
 from html import escape
@@ -32,6 +33,189 @@ try:
 except Exception:
     HAS_WEASYPRINT = False
 
+logger = logging.getLogger(__name__)
+
+INLINE_REPORT_TEMPLATE = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ report_title }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 24mm 15mm 22mm 15mm;
+    }
+
+    body {
+      font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+      color: #1f2937;
+      font-size: 11pt;
+      line-height: 1.7;
+      margin: 0;
+      padding: 0;
+    }
+
+    h1 {
+      font-size: 22pt;
+      font-weight: 700;
+      margin: 0 0 6mm 0;
+      color: #0f172a;
+    }
+
+    .meta {
+      font-size: 10pt;
+      color: #475569;
+      margin-bottom: 8mm;
+    }
+
+    h2 {
+      font-size: 15pt;
+      margin: 7mm 0 3mm 0;
+      font-weight: 700;
+      border-left: 4px solid #0ea5e9;
+      padding-left: 8px;
+      color: #111827;
+    }
+
+    p {
+      margin: 0 0 2.5mm 0;
+    }
+
+    ul {
+      margin: 1mm 0 3mm 6mm;
+      padding: 0;
+    }
+
+    li {
+      margin-bottom: 1.2mm;
+    }
+
+    .table-title {
+      margin-top: 4mm;
+      margin-bottom: 2mm;
+      font-size: 13pt;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 6mm;
+      font-size: 10pt;
+    }
+
+    th, td {
+      border: 1px solid #d1d5db;
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background-color: #f3f4f6;
+      font-weight: 700;
+      color: #1f2937;
+    }
+
+    .chart-block {
+      margin-bottom: 6mm;
+      page-break-inside: avoid;
+    }
+
+    .chart-title {
+      font-size: 13pt;
+      font-weight: 700;
+      margin: 0 0 2mm 0;
+      color: #0f172a;
+    }
+
+    .chart-image {
+      width: 100%;
+      max-width: 160mm;
+      border: 1px solid #e5e7eb;
+      padding: 4px;
+      background: #ffffff;
+      margin-bottom: 2mm;
+    }
+  </style>
+</head>
+<body>
+  <h1>{{ report_title }}</h1>
+  <div class="meta">生成时间：{{ generated_at }}</div>
+
+  <div class="table-title">关键数据概览</div>
+  <table>
+    <thead>
+      <tr>
+        <th>指标</th>
+        <th>数值</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in key_metrics %}
+      <tr>
+        <td>{{ item.label }}</td>
+        <td>{{ item.value }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="chart-block">
+    <div class="chart-title">薪资范围分布</div>
+    {% if salary_chart_base64 %}
+    <img class="chart-image" src="data:image/png;base64,{{ salary_chart_base64 }}" alt="薪资范围分布饼状图">
+    {% endif %}
+    <table>
+      <thead><tr><th>区间</th><th>数量</th></tr></thead>
+      <tbody>
+        {% for row in salary_chart_rows %}
+        <tr><td>{{ row.label }}</td><td>{{ row.value }}</td></tr>
+        {% endfor %}
+        {% if not salary_chart_rows %}
+        <tr><td colspan="2">暂无薪资分布数据</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="chart-block">
+    <div class="chart-title">技能要求 Top10 分布</div>
+    {% if skills_chart_base64 %}
+    <img class="chart-image" src="data:image/png;base64,{{ skills_chart_base64 }}" alt="技能要求Top10饼状图">
+    {% endif %}
+    <table>
+      <thead><tr><th>技能</th><th>数量</th></tr></thead>
+      <tbody>
+        {% for row in skills_chart_rows %}
+        <tr><td>{{ row.label }}</td><td>{{ row.value }}</td></tr>
+        {% endfor %}
+        {% if not skills_chart_rows %}
+        <tr><td colspan="2">暂无技能分布数据</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {% for section in sections %}
+  <h2>{{ section.title }}</h2>
+    {% for block in section.blocks %}
+      {% if block.type == "paragraph" %}
+      <p>{{ block.text }}</p>
+      {% elif block.type == "bullets" %}
+      <ul>
+        {% for item in block.items %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+</body>
+</html>
+"""
+
 
 def _fmt_int(value: Optional[float]) -> str:
     if value is None:
@@ -47,11 +231,50 @@ class ReportGenerator:
         self.llm_generate_fn = llm_generate_fn
         self._template_env: Optional[Environment] = None
         if HAS_JINJA2:
-            template_dir = Path(__file__).resolve().parent.parent / "templates"
-            self._template_env = Environment(
-                loader=FileSystemLoader(str(template_dir)),
-                autoescape=select_autoescape(["html", "xml"]),
-            )
+            template_dir = self._resolve_template_dir()
+            if template_dir:
+                self._template_env = Environment(
+                    loader=FileSystemLoader(str(template_dir)),
+                    autoescape=select_autoescape(["html", "xml"]),
+                )
+                logger.info("PDF 模板目录已加载: %s", template_dir)
+            else:
+                logger.warning("未找到 report.html 模板文件，将使用内联 HTML 模板生成 PDF。")
+
+    @staticmethod
+    def _resolve_template_dir() -> Optional[Path]:
+        """尝试多个候选路径以适配本地、容器和 Railway 的目录结构。"""
+        current_file = Path(__file__).resolve()
+        project_root = current_file.parents[2] if len(current_file.parents) >= 3 else current_file.parent
+        env_template_dir = os.getenv("REPORT_TEMPLATE_DIR")
+
+        candidates: list[Path] = []
+        if env_template_dir:
+            candidates.append(Path(env_template_dir).expanduser())
+        candidates.extend(
+            [
+                current_file.parent.parent / "templates",
+                project_root / "backend" / "templates",
+                Path.cwd() / "backend" / "templates",
+                Path.cwd() / "templates",
+                Path("/app/backend/templates"),
+                Path("/app/templates"),
+            ]
+        )
+
+        checked: set[str] = set()
+        for candidate in candidates:
+            candidate_str = str(candidate)
+            if candidate_str in checked:
+                continue
+            checked.add(candidate_str)
+            template_file = candidate / "report.html"
+            logger.info("尝试加载 PDF 模板路径: %s", template_file)
+            if template_file.is_file():
+                return candidate
+
+        logger.error("所有候选路径均未找到 report.html，候选列表: %s", [str(path) for path in candidates])
+        return None
 
     @staticmethod
     def _build_career_advice_prompt(
@@ -340,11 +563,6 @@ class ReportGenerator:
         generated_at: Optional[str],
         market_insights: dict[str, Any],
     ) -> str:
-        if not self._template_env:
-            lines = [self._strip_markdown_prefix(raw) for raw in report_text.splitlines() if raw.strip()]
-            body = "".join(f"<p>{escape(line)}</p>" for line in lines)
-            return f"<html><body><h1>{escape(query)} 市场分析报告</h1>{body}</body></html>"
-
         generated_time = generated_at or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         sections = self._parse_report_sections(report_text)
         key_metrics = self._build_key_metrics_table(market_insights)
@@ -361,16 +579,41 @@ class ReportGenerator:
             labels=skill_labels,
             values=skill_values,
         )
+        salary_chart_rows = [{"label": label, "value": _fmt_int(value)} for label, value in zip(salary_labels, salary_values)]
+        skills_chart_rows = [{"label": label, "value": _fmt_int(value)} for label, value in zip(skill_labels, skill_values)]
 
-        template = self._template_env.get_template("report.html")
-        return template.render(
-            report_title=f"{query} 市场分析报告",
-            generated_at=generated_time,
-            sections=sections,
-            key_metrics=key_metrics,
-            salary_chart_base64=salary_chart,
-            skills_chart_base64=skill_chart,
-        )
+        context = {
+            "report_title": f"{query} 市场分析报告",
+            "generated_at": generated_time,
+            "sections": sections,
+            "key_metrics": key_metrics,
+            "salary_chart_base64": salary_chart,
+            "skills_chart_base64": skill_chart,
+            "salary_chart_rows": salary_chart_rows,
+            "skills_chart_rows": skills_chart_rows,
+        }
+
+        if self._template_env:
+            try:
+                template = self._template_env.get_template("report.html")
+                return template.render(**context)
+            except Exception:
+                # 模板存在但渲染失败时回退，避免 PDF 内容退化。
+                logger.exception("渲染外部 report.html 失败，将回退到内联模板。")
+
+        return self._render_inline_html_template(context)
+
+    def _render_inline_html_template(self, context: dict[str, Any]) -> str:
+        """内联模板兜底，确保关键表格和图表相关数据可展示。"""
+        if HAS_JINJA2:
+            inline_env = Environment(autoescape=select_autoescape(["html", "xml"]))
+            template = inline_env.from_string(INLINE_REPORT_TEMPLATE)
+            return template.render(**context)
+
+        # 理论上不会走到这里（generate_pdf 已检查 Jinja2），保留兜底避免空白页面。
+        lines = [self._strip_markdown_prefix(raw) for raw in str(context.get("sections", "")).splitlines() if raw.strip()]
+        body = "".join(f"<p>{escape(line)}</p>" for line in lines)
+        return f"<html><body><h1>{escape(str(context.get('report_title', '报告')))}</h1>{body}</body></html>"
 
     @staticmethod
     def _pdf_escape(text: str) -> str:

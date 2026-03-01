@@ -1,7 +1,9 @@
 """StatisticsService 单元测试。"""
 
+import pytest
+
 from backend.services.statistics import StatisticsService, parse_salary_text
-from backend.services.report_generator import ReportGenerator
+from backend.services.report_generator import HAS_JINJA2, ReportGenerator
 
 
 def _build_jobs() -> list[dict]:
@@ -293,3 +295,57 @@ class TestReportGenerator:
         assert "申请人数最多 TOP3" in report
         assert "薪资最高 TOP3" in report
         assert generated["report_meta"]["section_order"] == ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
+
+    @pytest.mark.skipif(not HAS_JINJA2, reason="Jinja2 不可用时无法验证内联模板渲染。")
+    def test_render_pdf_html_fallback_contains_table_and_chart_data_when_no_template_env(self):
+        generator = ReportGenerator()
+        generator._template_env = None
+        market_insights = {
+            "sample_overview": {
+                "total_jobs": 12,
+                "unique_companies": 5,
+                "unique_locations": 3,
+                "salary_coverage_pct": 80.0,
+            },
+            "salary_analysis": {"bands": {"100k-150k": 8, "150k-200k": 4}},
+            "skill_profile": {"top_skills": [{"skill": "Python", "count": 10}, {"skill": "SQL", "count": 6}]},
+        }
+
+        html = generator._render_pdf_html(
+            query="python developer",
+            report_text="## A. 样本概览\n- 测试",
+            generated_at="2026-03-01 00:00:00 UTC",
+            market_insights=market_insights,
+        )
+
+        assert "关键数据概览" in html
+        assert "薪资范围分布" in html
+        assert "技能要求 Top10 分布" in html
+        assert "薪资区间 100k-150k" in html
+        assert "Python" in html
+
+    @pytest.mark.skipif(not HAS_JINJA2, reason="Jinja2 不可用时无法验证模板异常兜底。")
+    def test_render_pdf_html_fallback_when_external_template_raises(self):
+        class BrokenTemplateEnv:
+            def get_template(self, _template_name: str):
+                raise RuntimeError("template load failed")
+
+        generator = ReportGenerator()
+        generator._template_env = BrokenTemplateEnv()
+        market_insights = {
+            "sample_overview": {"total_jobs": 2, "unique_companies": 1, "unique_locations": 1, "salary_coverage_pct": 100},
+            "salary_analysis": {"bands": {"80k-100k": 2}},
+            "skill_profile": {"top_skills": [{"skill": "Docker", "count": 2}]},
+        }
+
+        html = generator._render_pdf_html(
+            query="devops engineer",
+            report_text="## A. 元信息\n- 测试",
+            generated_at="2026-03-01 00:00:00 UTC",
+            market_insights=market_insights,
+        )
+
+        assert "关键数据概览" in html
+        assert "薪资范围分布" in html
+        assert "技能要求 Top10 分布" in html
+        assert "Docker" in html
