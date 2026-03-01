@@ -287,8 +287,9 @@ class TestReportGenerator:
         assert "按薪资区间申请人数" in report
         assert "## H. TOP3 职位" in report
         assert "## I. 深度分析" in report
+        assert "## J. 求职建议" in report
         assert "硬技能 Top10" in report
         assert "经验年限分布" in report
         assert "申请人数最多 TOP3" in report
         assert "薪资最高 TOP3" in report
-        assert generated["report_meta"]["section_order"] == ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
+        assert generated["report_meta"]["section_order"] == ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]

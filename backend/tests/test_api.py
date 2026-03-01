@@ -216,6 +216,23 @@ class TestAnalyzeEndpoint:
         response = client.get("/api/analyze?query=AI&max_results=-1")
         assert response.status_code == 422
 
+    def test_download_report_pdf(self):
+        """测试报告 PDF 下载接口。"""
+        analyze_response = client.get("/api/analyze?query=AI")
+        assert analyze_response.status_code == 200
+        analyze_data = analyze_response.json()
+        report_id = (
+            analyze_data.get("market_insights", {})
+            .get("report_meta", {})
+            .get("report_id", "")
+        )
+        assert report_id
+
+        pdf_response = client.get(f"/api/report/pdf?report_id={report_id}")
+        assert pdf_response.status_code == 200
+        assert pdf_response.headers.get("content-type", "").startswith("application/pdf")
+        assert pdf_response.content.startswith(b"%PDF")
+
 
 class TestCorsMiddleware:
     """CORS 中间件测试"""

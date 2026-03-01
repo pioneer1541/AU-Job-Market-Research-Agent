@@ -4,10 +4,12 @@ API 路由定义
 
 import logging
 import os
+import re
 from collections import Counter
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 
 from backend.agents.graph import get_compiled_graph
 from backend.agents.nodes import job_fetcher_node
@@ -30,12 +32,14 @@ from backend.api.schemas import (
     StatusResponse,
 )
 from backend.services.database import get_database_service
+from backend.services.report_generator import ReportGenerator
 from backend.services.statistics import StatisticsService
 
 # 配置日志
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+report_generator = ReportGenerator()
 
 
 # ==================== Mock 数据 ====================
@@ -529,6 +533,40 @@ async def get_report_detail(report_id: str) -> ReportDetailResponse:
         market_insights=insights,
         jobs=jobs,
         report=report_data.get("report", ""),
+    )
+
+
+@router.get(
+    "/report/pdf",
+    summary="下载报告 PDF",
+    description="根据报告 ID 生成并返回 PDF 文件流",
+    responses={404: {"model": ErrorResponse, "description": "报告不存在"}},
+)
+async def download_report_pdf(
+    report_id: str = Query(..., min_length=1, description="报告 ID"),
+) -> Response:
+    """生成并下载 PDF 报告。"""
+    db_service = get_database_service()
+    report_data = db_service.get_report(report_id)
+    if not report_data:
+        raise HTTPException(status_code=404, detail=f"报告不存在: {report_id}")
+
+    query = str(report_data.get("query", "Job Market")).strip() or "Job Market"
+    report_text = str(report_data.get("report", "")).strip()
+    created_at = str(report_data.get("created_at", "")).strip() or None
+
+    pdf_bytes = report_generator.generate_pdf(
+        query=query,
+        report_text=report_text,
+        generated_at=created_at,
+    )
+    safe_query = re.sub(r"[^a-zA-Z0-9_\-\u4e00-\u9fff]+", "_", query).strip("_") or "report"
+    filename = f"{safe_query}_{report_id}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

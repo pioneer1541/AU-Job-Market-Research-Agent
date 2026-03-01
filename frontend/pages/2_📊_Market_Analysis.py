@@ -203,6 +203,9 @@ if "analysis_defaults" not in st.session_state:
         "max_results": 20,
     }
 
+if "report_pdf_cache" not in st.session_state:
+    st.session_state["report_pdf_cache"] = {}
+
 with st.sidebar:
     st.header("⚙️ 配置")
     api_url = st.text_input("API 地址", value=st.session_state["api_url"], key="market_api_url")
@@ -572,6 +575,37 @@ with i6:
         st.bar_chart(years_dist_df.set_index("经验年限"))
 
 with st.expander("查看完整分析报告（Markdown）", expanded=False):
+    report_meta: Dict[str, Any] = market_insights.get("report_meta", {}) or {}
+    report_id = str(report_meta.get("report_id") or meta.get("report_id") or "").strip()
+
+    if report_id:
+        c_pdf1, c_pdf2 = st.columns([1, 1])
+        with c_pdf1:
+            if st.button("获取PDF", use_container_width=True):
+                try:
+                    client = APIClient(st.session_state["api_url"])
+                    pdf_bytes, filename = client.download_report_pdf(report_id=report_id)
+                    st.session_state["report_pdf_cache"][report_id] = {
+                        "bytes": pdf_bytes,
+                        "filename": filename or f"market_report_{report_id}.pdf",
+                    }
+                    st.success("PDF 已准备完成，可点击下载。")
+                except APIError as exc:
+                    _render_error(str(exc))
+
+        cached_pdf = st.session_state["report_pdf_cache"].get(report_id, {})
+        if cached_pdf.get("bytes"):
+            with c_pdf2:
+                st.download_button(
+                    label="下载PDF",
+                    data=cached_pdf["bytes"],
+                    file_name=str(cached_pdf.get("filename", f"market_report_{report_id}.pdf")),
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+    else:
+        st.info("当前结果暂无 report_id，无法下载 PDF。请先通过“生成分析报告”创建新报告。")
+
     if report.strip():
         st.markdown(report)
     else:

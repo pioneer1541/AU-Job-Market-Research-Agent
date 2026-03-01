@@ -333,6 +333,33 @@ class APIClient:
         except ValueError as exc:
             raise APIError("API 返回内容无法解析为 JSON。") from exc
 
+    def _request_bytes(self, method: str, path: str, **kwargs) -> tuple[bytes, str]:
+        url = f"{self.base_url}{path}"
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.request(method, url, **kwargs)
+                response.raise_for_status()
+                content_disposition = response.headers.get("content-disposition", "")
+                filename = ""
+                if "filename=" in content_disposition:
+                    filename = content_disposition.split("filename=", 1)[1].strip().strip('"')
+                return response.content, filename
+        except httpx.ConnectError as exc:
+            raise APIError(f"无法连接到后端服务：{self.base_url}") from exc
+        except httpx.TimeoutException as exc:
+            raise APIError("请求超时，请稍后重试。") from exc
+        except httpx.HTTPStatusError as exc:
+            detail = ""
+            try:
+                err_json = exc.response.json()
+                detail = err_json.get("message") or err_json.get("detail") or ""
+            except Exception:
+                detail = exc.response.text
+            detail = detail or f"HTTP {exc.response.status_code}"
+            raise APIError(f"API 请求失败：{detail}") from exc
+        except httpx.RequestError as exc:
+            raise APIError(f"请求异常：{str(exc)}") from exc
+
     def search_jobs(
         self,
         query: str,
@@ -372,3 +399,8 @@ class APIClient:
         """调用报告详情接口并标准化为分析页结构。"""
         payload = self._request("GET", f"/api/reports/{report_id}")
         return _normalize_report_detail_payload(payload)
+
+    def download_report_pdf(self, report_id: str) -> tuple[bytes, str]:
+        """下载报告 PDF，返回二进制内容与文件名。"""
+        params = {"report_id": report_id}
+        return self._request_bytes("GET", "/api/report/pdf", params=params)
