@@ -1,0 +1,420 @@
+"""
+统计分析服务
+
+为职位样本生成结构化市场统计结果。
+"""
+from __future__ import annotations
+
+import math
+import re
+from collections import Counter, defaultdict
+from datetime import date, datetime
+from statistics import median
+from typing import Any, Optional
+
+
+COMMON_SKILLS = {
+    "python": "Python",
+    "java": "Java",
+    "javascript": "JavaScript",
+    "typescript": "TypeScript",
+    "go": "Go",
+    "rust": "Rust",
+    "sql": "SQL",
+    "postgresql": "PostgreSQL",
+    "mysql": "MySQL",
+    "mongodb": "MongoDB",
+    "redis": "Redis",
+    "docker": "Docker",
+    "kubernetes": "Kubernetes",
+    "aws": "AWS",
+    "azure": "Azure",
+    "gcp": "GCP",
+    "fastapi": "FastAPI",
+    "django": "Django",
+    "flask": "Flask",
+    "react": "React",
+    "vue": "Vue",
+    "node.js": "Node.js",
+    "nodejs": "Node.js",
+    "pytorch": "PyTorch",
+    "tensorflow": "TensorFlow",
+    "llm": "LLM",
+    "nlp": "NLP",
+    "spark": "Spark",
+    "hadoop": "Hadoop",
+    "airflow": "Airflow",
+}
+
+
+def _to_date(raw: Optional[str]) -> Optional[date]:
+    if not raw:
+        return None
+    raw = raw.strip()
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _safe_div(numerator: float, denominator: float) -> float:
+    if denominator == 0:
+        return 0.0
+    return numerator / denominator
+
+
+def parse_salary_text(salary_text: Optional[str]) -> Optional[dict[str, Any]]:
+    """
+    解析薪资字符串并返回统一结构:
+    {
+      "min_annual": float,
+      "max_annual": float,
+      "currency": "AUD",
+      "period": "year" | "month" | "hour",
+      "raw": str
+    }
+    """
+    if not salary_text:
+        return None
+
+    raw = salary_text.strip()
+    s = raw.lower().replace(",", "").replace(" ", "")
+    if not s:
+        return None
+
+    currency = "AUD"
+    if "usd" in s or "$us" in s:
+        currency = "USD"
+    elif "gbp" in s or "£" in raw:
+        currency = "GBP"
+    elif "eur" in s or "€" in raw:
+        currency = "EUR"
+
+    period = "year"
+    if any(token in s for token in ["/month", "monthly", "permonth"]):
+        period = "month"
+    elif any(token in s for token in ["/hour", "hourly", "perhour", "/hr", "ph"]):
+        period = "hour"
+
+    values: list[float] = []
+    for match in re.findall(r"(\d+(?:\.\d+)?)k", s):
+        values.append(float(match) * 1000)
+    for match in re.findall(r"(\d{2,7}(?:\.\d+)?)", s):
+        num = float(match)
+        if num < 30 and "k" not in s:
+            continue
+        if num <= 1000 and period == "hour":
+            values.append(num)
+        elif num >= 1000:
+            values.append(num)
+
+    if not values:
+        return None
+
+    min_val = min(values)
+    max_val = max(values)
+
+    if period == "month":
+        min_annual = min_val * 12
+        max_annual = max_val * 12
+    elif period == "hour":
+        min_annual = min_val * 40 * 52
+        max_annual = max_val * 40 * 52
+    else:
+        min_annual = min_val
+        max_annual = max_val
+
+    return {
+        "min_annual": float(min_annual),
+        "max_annual": float(max_annual),
+        "currency": currency,
+        "period": period,
+        "raw": raw,
+    }
+
+
+class StatisticsService:
+    """职位市场统计计算服务。"""
+
+    def compute_sample_overview(
+        self,
+        jobs: list[dict[str, Any]],
+        analysis_results: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        analysis_results = analysis_results or []
+        total_jobs = len(jobs)
+        unique_companies = len({(j.get("company") or "").strip() for j in jobs if j.get("company")})
+        unique_locations = len({(j.get("location") or "").strip() for j in jobs if j.get("location")})
+
+        dated = [_to_date(j.get("posted_date")) for j in jobs]
+        dated = [d for d in dated if d]
+        date_min = min(dated).isoformat() if dated else None
+        date_max = max(dated).isoformat() if dated else None
+
+        salary_count = sum(1 for j in jobs if parse_salary_text(j.get("salary")))
+        salary_coverage = round(_safe_div(salary_count, max(total_jobs, 1)) * 100, 2)
+        analysis_coverage = round(_safe_div(len(analysis_results), max(total_jobs, 1)) * 100, 2)
+
+        return {
+            "total_jobs": total_jobs,
+            "unique_companies": unique_companies,
+            "unique_locations": unique_locations,
+            "date_range": {"start": date_min, "end": date_max},
+            "salary_coverage_pct": salary_coverage,
+            "analysis_coverage_pct": analysis_coverage,
+        }
+
+    def analyze_job_volume_trend(self, jobs: list[dict[str, Any]]) -> dict[str, Any]:
+        day_counter: Counter[str] = Counter()
+        for job in jobs:
+            d = _to_date(job.get("posted_date"))
+            if d:
+                day_counter[d.isoformat()] += 1
+
+        if not day_counter:
+            return {"series": [], "trend": "unknown", "avg_daily_postings": 0}
+
+        series = [{"date": d, "count": c} for d, c in sorted(day_counter.items())]
+        counts = [point["count"] for point in series]
+        avg_daily = round(sum(counts) / len(counts), 2)
+
+        midpoint = max(1, len(counts) // 2)
+        first_avg = sum(counts[:midpoint]) / len(counts[:midpoint])
+        second_avg = sum(counts[midpoint:]) / len(counts[midpoint:])
+        delta = second_avg - first_avg
+        if delta > 0.2:
+            trend = "up"
+        elif delta < -0.2:
+            trend = "down"
+        else:
+            trend = "flat"
+
+        return {"series": series, "trend": trend, "avg_daily_postings": avg_daily}
+
+    def analyze_salary(
+        self,
+        jobs: list[dict[str, Any]],
+        analysis_results: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        analysis_results = analysis_results or []
+        salary_entries: list[dict[str, Any]] = []
+        job_salary_by_id: dict[str, dict[str, Any]] = {}
+        for job in jobs:
+            parsed = parse_salary_text(job.get("salary"))
+            if parsed:
+                job_salary_by_id[job.get("id", "")] = parsed
+                salary_entries.append(parsed)
+
+        for result in analysis_results:
+            parsed = parse_salary_text(result.get("salary_estimate"))
+            job_id = result.get("job_id", "")
+            if parsed and job_id and job_id not in job_salary_by_id:
+                job_salary_by_id[job_id] = parsed
+                salary_entries.append(parsed)
+
+        if not salary_entries:
+            return {
+                "count": 0,
+                "coverage_pct": 0,
+                "currency": None,
+                "annual": {},
+                "bands": {},
+                "by_experience": {},
+            }
+
+        annual_mids = [(item["min_annual"] + item["max_annual"]) / 2 for item in salary_entries]
+        annual_lows = [item["min_annual"] for item in salary_entries]
+        annual_highs = [item["max_annual"] for item in salary_entries]
+        sorted_mids = sorted(annual_mids)
+        p25_idx = max(0, math.floor((len(sorted_mids) - 1) * 0.25))
+        p75_idx = max(0, math.floor((len(sorted_mids) - 1) * 0.75))
+
+        bands = {"<100k": 0, "100k-150k": 0, "150k-200k": 0, ">=200k": 0}
+        for mid in annual_mids:
+            if mid < 100000:
+                bands["<100k"] += 1
+            elif mid < 150000:
+                bands["100k-150k"] += 1
+            elif mid < 200000:
+                bands["150k-200k"] += 1
+            else:
+                bands[">=200k"] += 1
+
+        by_exp: dict[str, list[float]] = defaultdict(list)
+        for result in analysis_results:
+            job_id = result.get("job_id", "")
+            exp = result.get("experience_level", "Unknown") or "Unknown"
+            salary_item = job_salary_by_id.get(job_id)
+            if salary_item:
+                mid = (salary_item["min_annual"] + salary_item["max_annual"]) / 2
+                by_exp[exp].append(mid)
+
+        by_experience = {}
+        for exp, values in by_exp.items():
+            if not values:
+                continue
+            by_experience[exp] = {
+                "count": len(values),
+                "avg": round(sum(values) / len(values), 0),
+                "min": round(min(values), 0),
+                "max": round(max(values), 0),
+            }
+
+        salary_stats_legacy = {
+            "average": round(sum(annual_mids) / len(annual_mids), 0),
+            "min": round(min(annual_lows), 0),
+            "max": round(max(annual_highs), 0),
+            "count": len(annual_mids),
+            "currency": salary_entries[0]["currency"],
+            "by_experience": by_experience,
+            "by_industry": {},
+        }
+
+        return {
+            "count": len(salary_entries),
+            "coverage_pct": round(_safe_div(len(salary_entries), max(len(jobs), 1)) * 100, 2),
+            "currency": salary_entries[0]["currency"],
+            "annual": {
+                "avg": round(sum(annual_mids) / len(annual_mids), 0),
+                "median": round(median(annual_mids), 0),
+                "min": round(min(annual_lows), 0),
+                "max": round(max(annual_highs), 0),
+                "p25": round(sorted_mids[p25_idx], 0),
+                "p75": round(sorted_mids[p75_idx], 0),
+            },
+            "bands": bands,
+            "by_experience": by_experience,
+            "salary_stats_legacy": salary_stats_legacy,
+        }
+
+    def analyze_competition_intensity(self, jobs: list[dict[str, Any]]) -> dict[str, Any]:
+        total_jobs = len(jobs)
+        if total_jobs == 0:
+            return {
+                "competition_level": "unknown",
+                "jobs_per_company": 0,
+                "top_company_share_pct": 0,
+                "top_location_share_pct": 0,
+            }
+
+        company_counts = Counter((j.get("company") or "Unknown").strip() for j in jobs)
+        location_counts = Counter((j.get("location") or "Unknown").strip() for j in jobs)
+        jobs_per_company = round(total_jobs / max(len(company_counts), 1), 2)
+        top_company_share = round(_safe_div(max(company_counts.values()), total_jobs) * 100, 2)
+        top_location_share = round(_safe_div(max(location_counts.values()), total_jobs) * 100, 2)
+
+        score = total_jobs * 0.4 + jobs_per_company * 20 + top_company_share * 0.3
+        if score >= 70:
+            level = "high"
+        elif score >= 35:
+            level = "medium"
+        else:
+            level = "low"
+
+        return {
+            "competition_level": level,
+            "jobs_per_company": jobs_per_company,
+            "top_company_share_pct": top_company_share,
+            "top_location_share_pct": top_location_share,
+            "active_companies": len(company_counts),
+            "active_locations": len(location_counts),
+        }
+
+    def extract_skill_profile(
+        self,
+        jobs: list[dict[str, Any]],
+        analysis_results: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        analysis_results = analysis_results or []
+        skill_counter: Counter[str] = Counter()
+
+        for result in analysis_results:
+            for skill in result.get("skills_required", []) or []:
+                if skill:
+                    skill_counter[skill.strip()] += 1
+
+        for job in jobs:
+            text = f"{job.get('title', '')} {job.get('description', '')}".lower()
+            for token, canonical in COMMON_SKILLS.items():
+                pattern = rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])"
+                if re.search(pattern, text):
+                    skill_counter[canonical] += 1
+
+        top_skills = [{"skill": skill, "count": count} for skill, count in skill_counter.most_common(15)]
+        return {
+            "top_skills": top_skills,
+            "total_unique_skills": len(skill_counter),
+        }
+
+    def analyze_employers(self, jobs: list[dict[str, Any]]) -> dict[str, Any]:
+        if not jobs:
+            return {
+                "top_employers": [],
+                "remote_ratio_pct": 0,
+                "employer_concentration_hhi": 0,
+            }
+
+        company_counts = Counter((j.get("company") or "Unknown").strip() for j in jobs)
+        top_employers = [
+            {"company": company, "count": count}
+            for company, count in company_counts.most_common(10)
+        ]
+        total_jobs = len(jobs)
+        hhi = 0.0
+        for count in company_counts.values():
+            share = count / total_jobs
+            hhi += share * share
+
+        remote_jobs = 0
+        for job in jobs:
+            loc = (job.get("location") or "").lower()
+            if "remote" in loc or "hybrid" in loc:
+                remote_jobs += 1
+
+        return {
+            "top_employers": top_employers,
+            "remote_ratio_pct": round(_safe_div(remote_jobs, total_jobs) * 100, 2),
+            "employer_concentration_hhi": round(hhi, 4),
+            "unique_employers": len(company_counts),
+        }
+
+    def generate_market_insights(
+        self,
+        jobs: list[dict[str, Any]],
+        analysis_results: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        analysis_results = analysis_results or []
+        sample_overview = self.compute_sample_overview(jobs, analysis_results)
+        trend_analysis = self.analyze_job_volume_trend(jobs)
+        salary_analysis = self.analyze_salary(jobs, analysis_results)
+        competition_intensity = self.analyze_competition_intensity(jobs)
+        skill_profile = self.extract_skill_profile(jobs, analysis_results)
+        employer_profile = self.analyze_employers(jobs)
+
+        exp_dist = Counter(
+            (item.get("experience_level") or "Unknown")
+            for item in analysis_results
+        )
+        top_locations = Counter((j.get("location") or "Unknown") for j in jobs)
+        industry_dist = Counter((item.get("industry") or "Unknown") for item in analysis_results)
+
+        return {
+            "sample_overview": sample_overview,
+            "trend_analysis": trend_analysis,
+            "salary_analysis": salary_analysis,
+            "competition_intensity": competition_intensity,
+            "skill_profile": skill_profile,
+            "employer_profile": employer_profile,
+            # 兼容旧字段
+            "top_skills": skill_profile.get("top_skills", []),
+            "experience_distribution": dict(exp_dist),
+            "top_locations": [
+                {"location": loc, "count": count}
+                for loc, count in top_locations.most_common(5)
+            ],
+            "industry_distribution": dict(industry_dist),
+            "total_analyzed": len(analysis_results),
+            "salary_stats": salary_analysis.get("salary_stats_legacy"),
+        }

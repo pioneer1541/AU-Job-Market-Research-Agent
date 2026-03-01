@@ -71,6 +71,14 @@ class MarketInsights(BaseModel):
     top_companies: list[str] = Field(default_factory=list, description="热门公司")
     experience_distribution: dict[str, int] = Field(default_factory=dict, description="经验分布")
     location_distribution: dict[str, int] = Field(default_factory=dict, description="地点分布")
+    sample_overview: dict = Field(default_factory=dict, description="样本概览统计")
+    trend_analysis: dict = Field(default_factory=dict, description="职位量趋势分析")
+    salary_analysis: dict = Field(default_factory=dict, description="薪资分析与解析")
+    competition_intensity: dict = Field(default_factory=dict, description="竞争强度统计")
+    skill_profile: dict = Field(default_factory=dict, description="技能提取与画像")
+    employer_profile: dict = Field(default_factory=dict, description="雇主分析画像")
+    report_meta: dict = Field(default_factory=dict, description="报告元信息")
+    report_sections: dict[str, str] = Field(default_factory=dict, description="模块化报告章节")
 
 
 class AnalyzeResponse(BaseModel):
