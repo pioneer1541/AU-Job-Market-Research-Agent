@@ -151,6 +151,113 @@ def parse_salary_text(salary_text: Optional[str]) -> Optional[dict[str, Any]]:
 class StatisticsService:
     """职位市场统计计算服务。"""
 
+    def analyze_applicants(
+        self,
+        jobs: list[dict[str, Any]],
+        analysis_results: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        """
+        统计申请人数分析：
+        1) 平均每个职位申请人数
+        2) 按经验级别分组的申请人数统计
+        3) 按薪资区间分组的申请人数统计
+        """
+        analysis_results = analysis_results or []
+        applicants_candidates = ["num_applicants", "numApplicants", "applicants", "application_count", "apply_count"]
+
+        # 建立职位 -> 申请人数映射，仅保留可解析为正整数的样本。
+        applicants_by_job_id: dict[str, int] = {}
+        applicants_values: list[int] = []
+        for idx, job in enumerate(jobs):
+            applicants: Optional[int] = None
+            for field in applicants_candidates:
+                if field in job and job.get(field) is not None:
+                    applicants = _to_int(job.get(field))
+                    if applicants is not None:
+                        break
+            if applicants is None or applicants < 0:
+                continue
+
+            # 优先使用 job.id 关联，缺失时回退为稳定索引键，便于与分析结果对齐失败时仍可统计总体。
+            job_id = str(job.get("id", "")).strip() or f"idx:{idx}"
+            applicants_by_job_id[job_id] = int(applicants)
+            applicants_values.append(int(applicants))
+
+        if not applicants_values:
+            return {
+                "count": 0,
+                "coverage_pct": 0,
+                "avg_applicants_per_job": 0,
+                "by_experience": {},
+                "by_salary_band": {},
+            }
+
+        # 按经验级别聚合（依赖 analysis_results 的 job_id 与 experience_level）。
+        exp_buckets: dict[str, list[int]] = defaultdict(list)
+        for result in analysis_results:
+            job_id = str(result.get("job_id", "")).strip()
+            if not job_id:
+                continue
+            applicants = applicants_by_job_id.get(job_id)
+            if applicants is None:
+                continue
+            exp = str(result.get("experience_level", "") or "Unknown").strip() or "Unknown"
+            exp_buckets[exp].append(applicants)
+
+        by_experience: dict[str, dict[str, float | int]] = {}
+        for exp, values in exp_buckets.items():
+            if not values:
+                continue
+            by_experience[exp] = {
+                "jobs": len(values),
+                "total_applicants": int(sum(values)),
+                "avg_applicants": round(sum(values) / len(values), 2),
+            }
+
+        # 按薪资区间聚合，薪资区间基于年化中位值。
+        salary_band_values: dict[str, list[int]] = defaultdict(list)
+        for idx, job in enumerate(jobs):
+            job_id = str(job.get("id", "")).strip() or f"idx:{idx}"
+            applicants = applicants_by_job_id.get(job_id)
+            if applicants is None:
+                continue
+
+            parsed_salary = parse_salary_text(job.get("salary"))
+            if not parsed_salary:
+                continue
+            mid_annual = (parsed_salary.get("min_annual", 0.0) + parsed_salary.get("max_annual", 0.0)) / 2
+
+            if mid_annual < 100000:
+                band = "<100k"
+            elif mid_annual < 150000:
+                band = "100k-150k"
+            elif mid_annual < 200000:
+                band = "150k-200k"
+            else:
+                band = ">=200k"
+            salary_band_values[band].append(applicants)
+
+        # 固定输出顺序，便于前端稳定展示。
+        band_order = ["<100k", "100k-150k", "150k-200k", ">=200k"]
+        by_salary_band: dict[str, dict[str, float | int]] = {}
+        for band in band_order:
+            values = salary_band_values.get(band, [])
+            if not values:
+                continue
+            by_salary_band[band] = {
+                "jobs": len(values),
+                "total_applicants": int(sum(values)),
+                "avg_applicants": round(sum(values) / len(values), 2),
+            }
+
+        return {
+            "count": len(applicants_values),
+            "coverage_pct": round(_safe_div(len(applicants_values), max(len(jobs), 1)) * 100, 2),
+            "avg_applicants_per_job": round(sum(applicants_values) / len(applicants_values), 2),
+            "by_experience": by_experience,
+            "by_salary_band": by_salary_band,
+        }
+
     def get_top_jobs(self, jobs: list[dict[str, Any]], top_n: int = 3) -> dict[str, list[dict[str, Any]]]:
         """
         返回两个 TOPN 职位列表：
@@ -510,6 +617,7 @@ class StatisticsService:
         sample_overview = self.compute_sample_overview(jobs, analysis_results)
         trend_analysis = self.analyze_job_volume_trend(jobs)
         salary_analysis = self.analyze_salary(jobs, analysis_results)
+        applicant_analysis = self.analyze_applicants(jobs, analysis_results)
         competition_intensity = self.analyze_competition_intensity(jobs)
         skill_profile = self.extract_skill_profile(jobs, analysis_results)
         employer_profile = self.analyze_employers(jobs)
@@ -526,6 +634,7 @@ class StatisticsService:
             "sample_overview": sample_overview,
             "trend_analysis": trend_analysis,
             "salary_analysis": salary_analysis,
+            "applicant_analysis": applicant_analysis,
             "competition_intensity": competition_intensity,
             "skill_profile": skill_profile,
             "employer_profile": employer_profile,

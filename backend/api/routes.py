@@ -204,6 +204,7 @@ def _build_market_insights_from_graph(jobs: list[JobListing], graph_result: dict
         sample_overview=market_insights.get("sample_overview", {}) or {},
         trend_analysis=market_insights.get("trend_analysis", {}) or {},
         salary_analysis=market_insights.get("salary_analysis", {}) or {},
+        applicant_analysis=market_insights.get("applicant_analysis", {}) or {},
         competition_intensity=market_insights.get("competition_intensity", {}) or {},
         skill_profile=market_insights.get("skill_profile", {}) or {},
         employer_profile=market_insights.get("employer_profile", {}) or {},

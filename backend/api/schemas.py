@@ -76,6 +76,7 @@ class MarketInsights(BaseModel):
     sample_overview: dict = Field(default_factory=dict, description="样本概览统计")
     trend_analysis: dict = Field(default_factory=dict, description="职位量趋势分析")
     salary_analysis: dict = Field(default_factory=dict, description="薪资分析与解析")
+    applicant_analysis: dict = Field(default_factory=dict, description="申请人数统计分析")
     competition_intensity: dict = Field(default_factory=dict, description="竞争强度统计")
     skill_profile: dict = Field(default_factory=dict, description="技能提取与画像")
     employer_profile: dict = Field(default_factory=dict, description="雇主分析画像")

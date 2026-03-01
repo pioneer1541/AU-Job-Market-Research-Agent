@@ -29,6 +29,7 @@ class ReportGenerator:
         sample = market_insights.get("sample_overview", {}) or {}
         trend = market_insights.get("trend_analysis", {}) or {}
         salary = market_insights.get("salary_analysis", {}) or {}
+        applicant = market_insights.get("applicant_analysis", {}) or {}
         competition = market_insights.get("competition_intensity", {}) or {}
         skills = market_insights.get("skill_profile", {}) or {}
         employers = market_insights.get("employer_profile", {}) or {}
@@ -93,12 +94,32 @@ class ReportGenerator:
             f"- 薪资带分布: {salary.get('bands', {})}\n"
         )
 
+        applicant_exp = applicant.get("by_experience", {}) if isinstance(applicant, dict) else {}
+        applicant_salary = applicant.get("by_salary_band", {}) if isinstance(applicant, dict) else {}
+        applicant_exp_lines = "\n".join(
+            f"  - {level}: 平均 {item.get('avg_applicants', 0)} 人/职位（样本 {item.get('jobs', 0)}）"
+            for level, item in applicant_exp.items()
+            if isinstance(item, dict)
+        ) or "  - 暂无按经验级别申请人数数据"
+        applicant_salary_lines = "\n".join(
+            f"  - {band}: 平均 {item.get('avg_applicants', 0)} 人/职位（样本 {item.get('jobs', 0)}）"
+            for band, item in applicant_salary.items()
+            if isinstance(item, dict)
+        ) or "  - 暂无按薪资区间申请人数数据"
+
         sections["E"] = (
             "## E. 竞争强度\n"
             f"- 竞争等级: {competition.get('competition_level', 'unknown')}\n"
             f"- 单公司平均岗位数: {competition.get('jobs_per_company', 0)}\n"
             f"- 头部公司占比: {competition.get('top_company_share_pct', 0)}%\n"
             f"- 头部地点占比: {competition.get('top_location_share_pct', 0)}%\n"
+            f"- 申请人数样本量: {_fmt_int(applicant.get('count'))}\n"
+            f"- 申请人数覆盖率: {applicant.get('coverage_pct', 0)}%\n"
+            f"- 平均每个职位申请人数: {applicant.get('avg_applicants_per_job', 0)}\n"
+            "- 按经验级别申请人数:\n"
+            f"{applicant_exp_lines}\n"
+            "- 按薪资区间申请人数:\n"
+            f"{applicant_salary_lines}\n"
         )
 
         top_skills = skills.get("top_skills", [])[:10]

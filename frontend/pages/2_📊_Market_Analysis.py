@@ -5,6 +5,7 @@ from collections import Counter
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
 import streamlit as st
 
 sys.path.insert(0, '.')
@@ -230,6 +231,7 @@ meta: Dict[str, Any] = result.get("meta", {}) or {}
 sample_overview: Dict[str, Any] = market_insights.get("sample_overview", {}) or {}
 trend_analysis: Dict[str, Any] = market_insights.get("trend_analysis", {}) or {}
 salary_analysis: Dict[str, Any] = market_insights.get("salary_analysis", {}) or {}
+applicant_analysis: Dict[str, Any] = market_insights.get("applicant_analysis", {}) or {}
 competition_intensity: Dict[str, Any] = market_insights.get("competition_intensity", {}) or {}
 skill_profile: Dict[str, Any] = market_insights.get("skill_profile", {}) or {}
 employer_profile: Dict[str, Any] = market_insights.get("employer_profile", {}) or {}
@@ -313,15 +315,78 @@ with st.expander("查看薪资分析说明", expanded=False):
     )
 
 # E. 竞争强度
-render_section_title("E. 竞争强度", "从地区职位集中度判断竞争热点")
-st.plotly_chart(
-    create_location_hotspot_chart(
-        jobs=jobs_for_chart,
-        location_distribution=location_distribution,
-        competition_intensity=competition_intensity,
-    ),
-    use_container_width=True,
-)
+render_section_title("E. 竞争强度", "从地区集中度与申请人数判断竞争压力")
+e1, e2, e3 = st.columns(3)
+with e1:
+    render_stat_card(
+        "平均申请人数/职位",
+        str(applicant_analysis.get("avg_applicants_per_job", 0)),
+        "基于含申请人数字段的职位样本",
+    )
+with e2:
+    render_stat_card(
+        "申请人数样本量",
+        str(applicant_analysis.get("count", 0)),
+        "可用于计算竞争强度",
+    )
+with e3:
+    render_stat_card(
+        "申请人数覆盖率",
+        f"{applicant_analysis.get('coverage_pct', 0)}%",
+        "申请人数字段覆盖的职位比例",
+    )
+
+left_e, right_e = st.columns(2)
+with left_e:
+    st.plotly_chart(
+        create_location_hotspot_chart(
+            jobs=jobs_for_chart,
+            location_distribution=location_distribution,
+            competition_intensity=competition_intensity,
+        ),
+        use_container_width=True,
+    )
+with right_e:
+    # 将经验级别平均申请人数转为柱状图，快速比较不同层级竞争压力。
+    exp_groups = applicant_analysis.get("by_experience", {}) if isinstance(applicant_analysis, dict) else {}
+    exp_rows = []
+    if isinstance(exp_groups, dict):
+        for level, item in exp_groups.items():
+            if not isinstance(item, dict):
+                continue
+            try:
+                exp_rows.append({"经验级别": str(level), "平均申请人数": float(item.get("avg_applicants", 0))})
+            except (TypeError, ValueError):
+                continue
+    if exp_rows:
+        exp_df = pd.DataFrame(exp_rows).sort_values("平均申请人数", ascending=False)
+        st.bar_chart(exp_df.set_index("经验级别"))
+    else:
+        st.info("暂无按经验级别的申请人数统计。")
+
+salary_groups = applicant_analysis.get("by_salary_band", {}) if isinstance(applicant_analysis, dict) else {}
+salary_rows = []
+if isinstance(salary_groups, dict):
+    for band, item in salary_groups.items():
+        if not isinstance(item, dict):
+            continue
+        try:
+            salary_rows.append({"薪资区间": str(band), "平均申请人数": float(item.get("avg_applicants", 0))})
+        except (TypeError, ValueError):
+            continue
+
+if salary_rows:
+    # 统一薪资区间展示顺序，避免图表顺序抖动。
+    band_order = ["<100k", "100k-150k", "150k-200k", ">=200k"]
+    salary_df = pd.DataFrame(salary_rows)
+    salary_df["order"] = salary_df["薪资区间"].apply(
+        lambda x: band_order.index(x) if x in band_order else len(band_order)
+    )
+    salary_df = salary_df.sort_values(["order", "平均申请人数"], ascending=[True, False]).drop(columns=["order"])
+    st.bar_chart(salary_df.set_index("薪资区间"))
+else:
+    st.info("暂无按薪资区间的申请人数统计。")
+
 with st.expander("查看竞争强度解读", expanded=False):
     if location_distribution:
         top3_total = sum(sorted(location_distribution.values(), reverse=True)[:3])
@@ -329,6 +394,11 @@ with st.expander("查看竞争强度解读", expanded=False):
         st.markdown(f"- Top 3 地区占比约 **{ratio:.1f}%**，可用于判断市场是否集中。")
     else:
         st.markdown("- 当前样本缺少完整地区分布，建议增加 `max_results` 或切换关键词。")
+    if applicant_analysis.get("count", 0):
+        st.markdown(
+            f"- 平均每个职位申请人数约 **{applicant_analysis.get('avg_applicants_per_job', 0)}**，"
+            "可结合经验级别与薪资区间评估投递难度。"
+        )
 
 # F. 技能画像
 render_section_title("F. 技能画像", "结合词频识别技能栈优先级")

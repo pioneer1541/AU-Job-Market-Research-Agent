@@ -136,6 +136,7 @@ class TestStatisticsService:
         assert "sample_overview" in insights
         assert "trend_analysis" in insights
         assert "salary_analysis" in insights
+        assert "applicant_analysis" in insights
         assert "competition_intensity" in insights
         assert "skill_profile" in insights
         assert "employer_profile" in insights
@@ -145,6 +146,20 @@ class TestStatisticsService:
         assert "top_skills" in insights
         assert "salary_stats" in insights
         assert isinstance(insights["skill_profile"].get("top_skills", []), list)
+
+    def test_analyze_applicants(self):
+        service = StatisticsService()
+        jobs = _build_jobs()
+        analysis_results = _build_analysis_results()
+
+        applicant = service.analyze_applicants(jobs, analysis_results)
+
+        assert applicant["count"] == 3
+        assert applicant["avg_applicants_per_job"] == 97.0
+        assert "Senior" in applicant["by_experience"]
+        assert applicant["by_experience"]["Senior"]["avg_applicants"] == 88.0
+        assert "100k-150k" in applicant["by_salary_band"]
+        assert applicant["by_salary_band"]["100k-150k"]["jobs"] >= 1
 
     def test_get_top_jobs(self):
         service = StatisticsService()
@@ -222,6 +237,19 @@ class TestReportGenerator:
                     }
                 ],
             },
+            "applicant_analysis": {
+                "count": 3,
+                "coverage_pct": 100.0,
+                "avg_applicants_per_job": 97.0,
+                "by_experience": {
+                    "Senior": {"jobs": 1, "total_applicants": 88, "avg_applicants": 88.0},
+                    "Mid": {"jobs": 2, "total_applicants": 203, "avg_applicants": 101.5},
+                },
+                "by_salary_band": {
+                    "100k-150k": {"jobs": 2, "total_applicants": 225, "avg_applicants": 112.5},
+                    "150k-200k": {"jobs": 1, "total_applicants": 66, "avg_applicants": 66.0},
+                },
+            },
         }
         processed_data = {
             "salary_filter_stats": {
@@ -246,6 +274,9 @@ class TestReportGenerator:
         assert "低薪过滤后职位数: 3" in report
         assert "过滤职位数: 2" in report
         assert "时薪 < 24 AUD 或年薪 < 50000 AUD" in report
+        assert "平均每个职位申请人数: 97.0" in report
+        assert "按经验级别申请人数" in report
+        assert "按薪资区间申请人数" in report
         assert "## H. TOP3 职位" in report
         assert "申请人数最多 TOP3" in report
         assert "薪资最高 TOP3" in report

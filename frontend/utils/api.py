@@ -102,6 +102,7 @@ def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     sample_overview = _extract_module_dict(market_insights, "sample_overview")
     trend_analysis = _extract_module_dict(market_insights, "trend_analysis")
     salary_analysis = _extract_module_dict(market_insights, "salary_analysis")
+    applicant_analysis = _extract_module_dict(market_insights, "applicant_analysis")
     competition_intensity = _extract_module_dict(market_insights, "competition_intensity")
     skill_profile = _extract_module_dict(market_insights, "skill_profile")
     employer_profile = _extract_module_dict(market_insights, "employer_profile")
@@ -185,6 +186,7 @@ def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "sample_overview": sample_overview,
         "trend_analysis": trend_analysis,
         "salary_analysis": salary_analysis,
+        "applicant_analysis": applicant_analysis,
         "competition_intensity": competition_intensity,
         "skill_profile": skill_profile,
         "employer_profile": employer_profile,
