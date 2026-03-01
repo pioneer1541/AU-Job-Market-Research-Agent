@@ -2,7 +2,6 @@
 
 一个基于 AI Agent 的澳洲职位市场研究工具，用于自动抓取 Seek 职位信息、解析 JD 内容并生成可视化分析报告，帮助你快速理解技能需求、薪资分布与市场趋势。
 
-**在线演示**: [https://au-job-market-research-agent-production.up.railway.app](https://au-job-market-research-agent-production.up.railway.app/)
 
 ## ✨ 功能特性
 
@@ -140,7 +139,6 @@ pytest -q
 
 | 服务 | URL |
 |------|-----|
-| 前端 | https://au-job-market-research-agent-production.up.railway.app/ |
 | 后端 | https://web-production-35c6c.up.railway.app/ |
 
 #### 部署步骤
