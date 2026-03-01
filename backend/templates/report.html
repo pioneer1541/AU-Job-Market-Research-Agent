@@ -141,14 +141,14 @@
   <div class="charts">
     {% if salary_chart_base64 %}
     <div class="chart-block">
-      <div class="chart-title">薪资范围分布饼状图</div>
-      <img class="chart-image" src="data:image/png;base64,{{ salary_chart_base64 }}" alt="薪资范围分布饼状图">
+      <div class="chart-title">Salary Range</div>
+      <img class="chart-image" src="data:image/png;base64,{{ salary_chart_base64 }}" alt="Salary Range Pie Chart">
     </div>
     {% endif %}
     {% if skills_chart_base64 %}
     <div class="chart-block">
-      <div class="chart-title">技能要求 Top10 饼状图</div>
-      <img class="chart-image" src="data:image/png;base64,{{ skills_chart_base64 }}" alt="技能要求Top10饼状图">
+      <div class="chart-title">Skills Top10</div>
+      <img class="chart-image" src="data:image/png;base64,{{ skills_chart_base64 }}" alt="Skills Top10 Pie Chart">
     </div>
     {% endif %}
   </div>
@@ -160,7 +160,7 @@
       <p>{{ block.text }}</p>
       {% elif block.type == "bullets" %}
       <ul>
-        {% for item in block.items %}
+        {% for item in block.bullets %}
         <li>{{ item }}</li>
         {% endfor %}
       </ul>

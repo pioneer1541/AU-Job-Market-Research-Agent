@@ -163,9 +163,9 @@ INLINE_REPORT_TEMPLATE = """<!DOCTYPE html>
   </table>
 
   <div class="chart-block">
-    <div class="chart-title">薪资范围分布</div>
+    <div class="chart-title">Salary Range</div>
     {% if salary_chart_base64 %}
-    <img class="chart-image" src="data:image/png;base64,{{ salary_chart_base64 }}" alt="薪资范围分布饼状图">
+    <img class="chart-image" src="data:image/png;base64,{{ salary_chart_base64 }}" alt="Salary Range Pie Chart">
     {% endif %}
     <table>
       <thead><tr><th>区间</th><th>数量</th></tr></thead>
@@ -181,9 +181,9 @@ INLINE_REPORT_TEMPLATE = """<!DOCTYPE html>
   </div>
 
   <div class="chart-block">
-    <div class="chart-title">技能要求 Top10 分布</div>
+    <div class="chart-title">Skills Top10</div>
     {% if skills_chart_base64 %}
-    <img class="chart-image" src="data:image/png;base64,{{ skills_chart_base64 }}" alt="技能要求Top10饼状图">
+    <img class="chart-image" src="data:image/png;base64,{{ skills_chart_base64 }}" alt="Skills Top10 Pie Chart">
     {% endif %}
     <table>
       <thead><tr><th>技能</th><th>数量</th></tr></thead>
@@ -205,7 +205,7 @@ INLINE_REPORT_TEMPLATE = """<!DOCTYPE html>
       <p>{{ block.text }}</p>
       {% elif block.type == "bullets" %}
       <ul>
-        {% for item in block.items %}
+        {% for item in block.bullets %}
         <li>{{ item }}</li>
         {% endfor %}
       </ul>
@@ -482,7 +482,8 @@ class ReportGenerator:
         for band, raw_count in bands.items():
             count = ReportGenerator._coerce_number(raw_count)
             if count > 0:
-                labels.append(f"薪资区间 {band}")
+                # 图表标签使用英文，减少运行环境缺少中文字体时的乱码风险。
+                labels.append(f"Band {band}")
                 values.append(count)
         return labels, values
 
@@ -528,7 +529,8 @@ class ReportGenerator:
         def flush_bullets() -> None:
             nonlocal bullet_buffer, current
             if bullet_buffer and current is not None:
-                current["blocks"].append({"type": "bullets", "items": bullet_buffer[:]})
+                # 使用 bullets 避免与 dict.items() 冲突，确保 Jinja2 可正确迭代。
+                current["blocks"].append({"type": "bullets", "bullets": bullet_buffer[:]})
                 bullet_buffer = []
 
         for raw_line in report_text.splitlines():
@@ -570,12 +572,12 @@ class ReportGenerator:
         skill_labels, skill_values = self._extract_top_skills_data(market_insights, limit=10)
 
         salary_chart = self._build_pie_chart_base64(
-            title="薪资范围分布",
+            title="Salary Range",
             labels=salary_labels,
             values=salary_values,
         )
         skill_chart = self._build_pie_chart_base64(
-            title="技能要求 Top10 分布",
+            title="Skills Top10",
             labels=skill_labels,
             values=skill_values,
         )
