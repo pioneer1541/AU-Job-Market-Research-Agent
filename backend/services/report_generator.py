@@ -3,20 +3,34 @@
 """
 from __future__ import annotations
 
+import base64
 import io
 import os
+import re
+from html import escape
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 try:
-    from reportlab.lib.pagesizes import A4
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-    from reportlab.pdfgen import canvas
-    HAS_REPORTLAB = True
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
 except Exception:
-    A4 = (595.27, 841.89)
-    HAS_REPORTLAB = False
+    HAS_MATPLOTLIB = False
+
+try:
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+    HAS_JINJA2 = True
+except Exception:
+    HAS_JINJA2 = False
+
+try:
+    from weasyprint import HTML
+    HAS_WEASYPRINT = True
+except Exception:
+    HAS_WEASYPRINT = False
 
 
 def _fmt_int(value: Optional[float]) -> str:
@@ -31,16 +45,13 @@ class ReportGenerator:
     def __init__(self, llm_generate_fn: Optional[Callable[[str], str]] = None):
         # 默认使用 mock 生成逻辑；测试环境不调用真实 LLM API。
         self.llm_generate_fn = llm_generate_fn
-        self._register_cjk_font()
-
-    @staticmethod
-    def _register_cjk_font() -> None:
-        if not HAS_REPORTLAB:
-            return
-        try:
-            pdfmetrics.getFont("STSong-Light")
-        except KeyError:
-            pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+        self._template_env: Optional[Environment] = None
+        if HAS_JINJA2:
+            template_dir = Path(__file__).resolve().parent.parent / "templates"
+            self._template_env = Environment(
+                loader=FileSystemLoader(str(template_dir)),
+                autoescape=select_autoescape(["html", "xml"]),
+            )
 
     @staticmethod
     def _build_career_advice_prompt(
@@ -170,63 +181,169 @@ class ReportGenerator:
         query: str,
         report_text: str,
         generated_at: Optional[str] = None,
+        market_insights: Optional[dict[str, Any]] = None,
     ) -> bytes:
-        """将 Markdown 报告文本转为简洁专业 PDF。"""
-        if not HAS_REPORTLAB:
+        """将 Markdown 报告文本转为专业 PDF（HTML 模板 + 图表）。"""
+        if not (HAS_WEASYPRINT and HAS_JINJA2):
             return self._generate_basic_pdf_bytes(query=query, report_text=report_text, generated_at=generated_at)
 
-        buffer = io.BytesIO()
-        pdf = canvas.Canvas(buffer, pagesize=A4)
-        page_width, page_height = A4
+        html = self._render_pdf_html(
+            query=query,
+            report_text=report_text,
+            generated_at=generated_at,
+            market_insights=market_insights or {},
+        )
+        return HTML(string=html).write_pdf()
 
-        title_font = "STSong-Light"
-        body_font = "STSong-Light"
-        margin_x = 42
-        y = page_height - 48
-        line_height = 16
-        max_width = page_width - 2 * margin_x
+    @staticmethod
+    def _coerce_number(value: Any) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
 
-        pdf.setTitle(f"{query} 市场分析报告")
-        pdf.setAuthor("Job Market Research Agent")
+    def _build_pie_chart_base64(self, title: str, labels: list[str], values: list[float]) -> str:
+        if not HAS_MATPLOTLIB or not labels or not values or sum(values) <= 0:
+            return ""
 
-        pdf.setFont(title_font, 16)
-        pdf.drawString(margin_x, y, f"{query} 市场分析报告")
-        y -= 24
+        fig, ax = plt.subplots(figsize=(5.6, 4.2))
+        ax.pie(
+            values,
+            labels=labels,
+            autopct="%1.1f%%",
+            startangle=135,
+            textprops={"fontsize": 9},
+        )
+        ax.axis("equal")
+        ax.set_title(title, fontsize=13, fontweight="bold")
+        fig.tight_layout()
 
-        meta_time = generated_at or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        pdf.setFont(body_font, 10)
-        pdf.drawString(margin_x, y, f"生成时间: {meta_time}")
-        y -= 20
+        chart_buffer = io.BytesIO()
+        fig.savefig(chart_buffer, format="png", dpi=140, bbox_inches="tight")
+        plt.close(fig)
+        return base64.b64encode(chart_buffer.getvalue()).decode("utf-8")
 
-        pdf.setFont(body_font, 11)
-        lines = [self._strip_markdown_prefix(raw) for raw in report_text.splitlines() if raw.strip()]
-        for line in lines:
-            current = line
-            while current:
-                # 简单按宽度切行，避免内容超出页面。
-                split_at = len(current)
-                while split_at > 1 and pdf.stringWidth(current[:split_at], body_font, 11) > max_width:
-                    split_at -= 1
-                draw = current[:split_at].strip()
-                current = current[split_at:].strip()
+    @staticmethod
+    def _extract_salary_band_data(market_insights: dict[str, Any]) -> tuple[list[str], list[float]]:
+        salary_analysis = market_insights.get("salary_analysis", {}) or {}
+        bands = salary_analysis.get("bands", {}) or {}
+        labels: list[str] = []
+        values: list[float] = []
+        for band, raw_count in bands.items():
+            count = ReportGenerator._coerce_number(raw_count)
+            if count > 0:
+                labels.append(f"薪资区间 {band}")
+                values.append(count)
+        return labels, values
 
-                if not draw:
-                    continue
+    @staticmethod
+    def _extract_top_skills_data(market_insights: dict[str, Any], limit: int = 10) -> tuple[list[str], list[float]]:
+        skill_profile = market_insights.get("skill_profile", {}) or {}
+        top_skills = skill_profile.get("top_skills", []) or []
+        labels: list[str] = []
+        values: list[float] = []
+        for item in top_skills[:limit]:
+            if not isinstance(item, dict):
+                continue
+            skill = str(item.get("skill", "")).strip()
+            count = ReportGenerator._coerce_number(item.get("count"))
+            if skill and count > 0:
+                labels.append(skill)
+                values.append(count)
+        return labels, values
 
-                if y < 50:
-                    pdf.showPage()
-                    pdf.setFont(body_font, 11)
-                    y = page_height - 48
+    @staticmethod
+    def _build_key_metrics_table(market_insights: dict[str, Any]) -> list[dict[str, str]]:
+        sample = market_insights.get("sample_overview", {}) or {}
+        salary = market_insights.get("salary_analysis", {}) or {}
+        annual = salary.get("annual", {}) or {}
+        applicant = market_insights.get("applicant_analysis", {}) or {}
 
-                pdf.drawString(margin_x, y, draw)
-                y -= line_height
+        return [
+            {"label": "样本职位数", "value": _fmt_int(sample.get("total_jobs"))},
+            {"label": "雇主数", "value": _fmt_int(sample.get("unique_companies"))},
+            {"label": "城市/地点数", "value": _fmt_int(sample.get("unique_locations"))},
+            {"label": "薪资覆盖率", "value": f"{sample.get('salary_coverage_pct', 0)}%"},
+            {"label": "年化平均薪资", "value": _fmt_int(annual.get("avg"))},
+            {"label": "年化中位薪资", "value": _fmt_int(annual.get("median"))},
+            {"label": "平均申请人数", "value": str(applicant.get("avg_applicants_per_job", 0))},
+            {"label": "竞争等级", "value": str((market_insights.get("competition_intensity", {}) or {}).get("competition_level", "N/A"))},
+        ]
 
-            y -= 2
+    def _parse_report_sections(self, report_text: str) -> list[dict[str, Any]]:
+        sections: list[dict[str, Any]] = []
+        current: Optional[dict[str, Any]] = None
+        bullet_buffer: list[str] = []
 
-        pdf.save()
-        pdf_bytes = buffer.getvalue()
-        buffer.close()
-        return pdf_bytes
+        def flush_bullets() -> None:
+            nonlocal bullet_buffer, current
+            if bullet_buffer and current is not None:
+                current["blocks"].append({"type": "bullets", "items": bullet_buffer[:]})
+                bullet_buffer = []
+
+        for raw_line in report_text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                flush_bullets()
+                continue
+            if line.startswith("# "):
+                continue
+            if line.startswith("## "):
+                flush_bullets()
+                title = line[3:].strip()
+                current = {"title": title, "blocks": []}
+                sections.append(current)
+                continue
+            if current is None:
+                current = {"title": "报告内容", "blocks": []}
+                sections.append(current)
+            if re.match(r"^[-*]\s+", line):
+                bullet_buffer.append(re.sub(r"^[-*]\s+", "", line))
+            else:
+                flush_bullets()
+                current["blocks"].append({"type": "paragraph", "text": line})
+
+        flush_bullets()
+        return sections
+
+    def _render_pdf_html(
+        self,
+        query: str,
+        report_text: str,
+        generated_at: Optional[str],
+        market_insights: dict[str, Any],
+    ) -> str:
+        if not self._template_env:
+            lines = [self._strip_markdown_prefix(raw) for raw in report_text.splitlines() if raw.strip()]
+            body = "".join(f"<p>{escape(line)}</p>" for line in lines)
+            return f"<html><body><h1>{escape(query)} 市场分析报告</h1>{body}</body></html>"
+
+        generated_time = generated_at or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        sections = self._parse_report_sections(report_text)
+        key_metrics = self._build_key_metrics_table(market_insights)
+        salary_labels, salary_values = self._extract_salary_band_data(market_insights)
+        skill_labels, skill_values = self._extract_top_skills_data(market_insights, limit=10)
+
+        salary_chart = self._build_pie_chart_base64(
+            title="薪资范围分布",
+            labels=salary_labels,
+            values=salary_values,
+        )
+        skill_chart = self._build_pie_chart_base64(
+            title="技能要求 Top10 分布",
+            labels=skill_labels,
+            values=skill_values,
+        )
+
+        template = self._template_env.get_template("report.html")
+        return template.render(
+            report_title=f"{query} 市场分析报告",
+            generated_at=generated_time,
+            sections=sections,
+            key_metrics=key_metrics,
+            salary_chart_base64=salary_chart,
+            skills_chart_base64=skill_chart,
+        )
 
     @staticmethod
     def _pdf_escape(text: str) -> str:

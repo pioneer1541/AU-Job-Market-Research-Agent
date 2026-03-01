@@ -559,6 +559,7 @@ async def download_report_pdf(
         query=query,
         report_text=report_text,
         generated_at=created_at,
+        market_insights=report_data.get("market_insights") or {},
     )
     safe_query = re.sub(r"[^a-zA-Z0-9_\-\u4e00-\u9fff]+", "_", query).strip("_") or "report"
     filename = f"{safe_query}_{report_id}.pdf"
