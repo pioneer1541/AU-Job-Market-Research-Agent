@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     # Application
     app_env: str = "development"
+    log_level: str = "INFO"
 
     model_config = SettingsConfigDict(
         env_file=".env",
