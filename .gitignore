@@ -62,4 +62,5 @@ logs/
 # Data files
 data/
 *.json
+!backend/tests/fixtures/*.json
 !package.json

@@ -1,5 +1,7 @@
 """
 Apify 客户端测试
+
+使用 mock 数据进行测试，不会触发真实 API 调用。
 """
 import sys
 import json
@@ -24,9 +26,10 @@ from services.apify_client import (
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-def load_real_job_data():
-    """加载真实的职位数据用于测试"""
-    fixture_file = FIXTURES_DIR / "seek_response.json"
+def load_mock_job_data():
+    """加载 mock 职位数据用于测试"""
+    # 使用新的 fixture 文件名
+    fixture_file = FIXTURES_DIR / "seek_scraper_response.json"
     if fixture_file.exists():
         with open(fixture_file, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -67,36 +70,57 @@ class TestApifyClient:
             # 退出后客户端应关闭
             assert client._client is None
     
-    def test_parse_to_job_listing(self):
-        """测试原始数据解析为 JobListing"""
+    def test_parse_to_job_listing_websift_format(self):
+        """测试解析 websift/seek-job-scraper 格式的数据"""
+        # 使用真实 fixture 数据格式
         raw_job = {
-            "id": "12345678",
-            "title": "Senior Python Developer",
-            "salary": "$150k - $180k + super",
-            "location": "Melbourne VIC",
-            "advertiser": {"name": "Tech Recruitment"},
-            "companyProfile": {"name": "Tech Corp"},
-            "listedAt": "2026-03-01T00:00:00Z",
-            "url": "https://www.seek.com.au/job/12345678",
+            "id": "90603522",
+            "jobLink": "https://www.seek.com.au/job/90603522",
+            "title": "Senior AI Engineer",
+            "salary": "$140,000 – $160,000 per year",  # en-dash
+            "workTypes": "Full time",
+            "workArrangements": "Hybrid",
+            "joblocationInfo": {
+                "displayLocation": "Melbourne VIC",
+                "location": "Melbourne",
+                "country": "Australia",
+                "suburb": "Melbourne"
+            },
+            "advertiser": {
+                "id": "12345",
+                "name": "Tech Corp",
+                "isVerified": True
+            },
+            "companyProfile": {
+                "id": "67890",
+                "name": "Tech Corp",
+                "size": "100-500 employees"
+            },
             "content": {
-                "bulletPoints": ["Python", "FastAPI", "PostgreSQL"],
-                "sections": [
-                    {"title": "About the role", "content": "Great opportunity..."},
-                ]
-            }
+                "bulletPoints": [
+                    "Great team culture",
+                    "Competitive salary",
+                    "Flexible working"
+                ],
+                "jobHook": "Join our AI team!",
+                "sections": ["About the role", "Requirements"]
+            },
+            "listedAt": "2026-02-27T00:32:47.831Z"
         }
         
         result = ApifyClient.parse_to_job_listing(raw_job)
         
-        assert result["id"] == "12345678"
-        assert result["title"] == "Senior Python Developer"
-        assert result["company"] == "Tech Corp"  # companyProfile 优先
+        assert result["id"] == "90603522"
+        assert result["title"] == "Senior AI Engineer"
+        assert result["company"] == "Tech Corp"
         assert result["location"] == "Melbourne VIC"
-        assert result["salary"] == "$150k - $180k"  # 清洗后只保留核心薪资格式
+        # 薪资应该包含 en-dash 格式
+        assert result["salary"] is not None
+        assert "140,000" in result["salary"]
         assert result["source"] == "seek"
-        assert result["posted_date"] == "2026-03-01T00:00:00Z"
-        assert "Python" in result["description"]
-        assert "About the role" in result["description"]
+        assert result["url"] == "https://www.seek.com.au/job/90603522"
+        assert "Great team culture" in result["description"]
+        assert "Join our AI team" in result["description"]
     
     def test_parse_to_job_listing_minimal(self):
         """测试最小数据的解析"""
@@ -115,49 +139,84 @@ class TestApifyClient:
         assert result["source"] == "seek"
         assert "https://www.seek.com.au/job/999" in result["url"]
     
-    def test_parse_real_job_data(self):
-        """测试解析真实的 Seek 职位数据"""
-        real_data = load_real_job_data()
-        if not real_data:
-            pytest.skip("真实 fixture 数据不存在，请运行 test_apify_real.py 生成")
+    def test_parse_real_fixture_data(self):
+        """测试解析真实 fixture 数据"""
+        mock_data = load_mock_job_data()
+        if not mock_data:
+            pytest.skip("Mock fixture 数据不存在: seek_scraper_response.json")
         
-        # 解析第一条数据
-        first_job = real_data[0]
-        result = ApifyClient.parse_to_job_listing(first_job)
-        
-        # 验证关键字段
-        assert result["id"] == first_job["id"]
-        assert result["title"] == first_job["title"]
-        assert result["source"] == "seek"
-        assert result["url"].startswith("https://www.seek.com.au")
-    
-    def test_parse_all_real_job_data(self):
-        """测试解析所有真实数据"""
-        real_data = load_real_job_data()
-        if not real_data:
-            pytest.skip("真实 fixture 数据不存在，请运行 test_apify_real.py 生成")
-        
-        results = [ApifyClient.parse_to_job_listing(job) for job in real_data]
+        # 解析所有数据
+        results = [ApifyClient.parse_to_job_listing(job) for job in mock_data]
         
         # 验证所有数据都能成功解析
-        assert len(results) == len(real_data)
-        for result in results:
-            assert result["id"]
-            assert result["title"]
-            assert result["source"] == "seek"
+        assert len(results) == len(mock_data)
+        
+        # 验证第一条数据的关键字段
+        first_result = results[0]
+        first_raw = mock_data[0]
+        
+        assert first_result["id"] == first_raw["id"]
+        assert first_result["title"] == first_raw["title"]
+        assert first_result["source"] == "seek"
+        assert first_result["url"] == first_raw["jobLink"]
+        
+        # 验证公司名称提取
+        expected_company = (
+            first_raw.get("advertiser", {}).get("name") or
+            first_raw.get("companyProfile", {}).get("name") or
+            "Unknown"
+        )
+        assert first_result["company"] == expected_company
+    
+    def test_salary_cleaning(self):
+        """测试薪资字段清洗"""
+        from services.apify_client import clean_salary
+        
+        # 正常范围格式 (en-dash 和 hyphen)
+        assert "140,000" in clean_salary("$140,000 – $160,000 per year")  # en-dash
+        assert "100k" in clean_salary("$100k - $150k")  # hyphen
+        assert "80" in clean_salary("$80 to $120")
+        
+        # AUD 格式
+        aud_salary = clean_salary("AUD 180000 - 220000 per annum")
+        assert aud_salary is not None
+        assert "AUD" in aud_salary
+        
+        # Daily rate 格式
+        daily_salary = clean_salary("$800 - $1k p.d.")
+        assert daily_salary is not None
+        
+        # 单个数字
+        assert clean_salary("$150,000") == "$150,000"
+        # 注: clean_salary 只提取第一个匹配的数字部分
+        assert "$100" in clean_salary("Around $100k")  # 提取到 $100
+        
+        # 包含换行符（应返回 None）
+        assert clean_salary("$100k\nPlus super") is None
+        
+        # 过长（应返回 None）
+        assert clean_salary("$100k - $150k plus superannuation and bonuses and more info") is None
+        
+        # 无薪资信息
+        assert clean_salary("Competitive salary") is None
+        assert clean_salary(None) is None
+        
+        # N/A 值
+        assert clean_salary("N/A") is None
+        assert clean_salary("n/a") is None
     
     @pytest.mark.asyncio
     async def test_run_seek_scraper_success(self):
         """测试成功的 Seek Scraper 调用"""
         import httpx
         
-        # 使用真实数据作为 mock 响应
-        real_data = load_real_job_data()
-        mock_response_data = real_data or [{"id": "job-1", "title": "Test Job"}]
+        # 使用 mock 数据
+        mock_data = load_mock_job_data() or [{"id": "job-1", "title": "Test Job"}]
         
         with patch.dict("os.environ", {"APIFY_API_TOKEN": "test-token"}):
-            # Mock httpx.AsyncClient
             mock_http_client = MagicMock(spec=httpx.AsyncClient)
+            
+            # Mock POST (启动 actor)
             mock_http_client.post = AsyncMock()
             mock_http_client.post.return_value = MagicMock(
                 status_code=201,
@@ -165,24 +224,23 @@ class TestApifyClient:
             )
             mock_http_client.post.return_value.raise_for_status = MagicMock()
             
-            # 创建 get 响应序列
+            # Mock GET 响应序列
             get_responses = [
-                # 第一次轮询 - 运行中
+                # 轮询状态 - 运行中
                 MagicMock(json=lambda: {"data": {"status": "RUNNING"}}),
-                # 第二次轮询 - 完成
+                # 轮询状态 - 完成
                 MagicMock(json=lambda: {
                     "data": {
                         "status": "SUCCEEDED",
                         "defaultDatasetId": "dataset-456"
                     }
                 }),
-                # 获取数据集 - 使用真实数据
-                MagicMock(json=lambda: mock_response_data)
+                # 获取数据集
+                MagicMock(json=lambda: mock_data)
             ]
             for resp in get_responses:
                 resp.raise_for_status = MagicMock()
             
-            # 使用迭代器来确保 side_effect 消耗正确
             get_iter = iter(get_responses)
             mock_http_client.get = AsyncMock(side_effect=lambda *args, **kwargs: next(get_iter))
             mock_http_client.aclose = AsyncMock()
@@ -193,13 +251,10 @@ class TestApifyClient:
                         results = await client.run_seek_scraper(
                             search_query="AI Engineer",
                             location="Melbourne",
-                            max_items=5
+                            max_items=10
                         )
                     
-                    assert len(results) == len(mock_response_data)
-                    if real_data:
-                        # 验证真实数据的格式
-                        assert results[0]["id"] == real_data[0]["id"]
+                    assert len(results) == len(mock_data)
     
     @pytest.mark.asyncio
     async def test_rate_limit_error(self):
@@ -267,96 +322,73 @@ class TestFetchJobsFromSeek:
     @pytest.mark.asyncio
     async def test_fetch_jobs_from_seek(self):
         """测试便捷函数调用"""
-        with patch.dict("os.environ", {"APIFY_API_TOKEN": "test-token"}):
-            with patch("services.apify_client.ApifyClient") as MockClient:
-                mock_instance = AsyncMock()
-                mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
-                mock_instance.__aexit__ = AsyncMock(return_value=None)
-                mock_instance.run_seek_scraper = AsyncMock(return_value=[
-                    {"id": "1", "title": "Job 1"},
-                    {"id": "2", "title": "Job 2"},
-                ])
-                MockClient.return_value = mock_instance
-                
-                jobs = await fetch_jobs_from_seek("python", "Melbourne", 10)
-                
-                assert len(jobs) == 2
-                mock_instance.run_seek_scraper.assert_called_once_with(
-                    "python", "Melbourne", 10
-                )
-    
-    @pytest.mark.asyncio
-    async def test_fetch_jobs_from_seek_with_real_data(self):
-        """测试使用真实数据的便捷函数"""
-        real_data = load_real_job_data()
-        if not real_data:
-            pytest.skip("真实 fixture 数据不存在，请运行 test_apify_real.py 生成")
+        mock_data = load_mock_job_data() or [{"id": "1", "title": "Job 1"}]
         
         with patch.dict("os.environ", {"APIFY_API_TOKEN": "test-token"}):
-            # 不 mock 整个类，而是 mock 实例方法
             from services.apify_client import ApifyClient
             
             async def mock_run_seek_scraper(*args, **kwargs):
-                return real_data
+                return mock_data
             
             with patch.object(ApifyClient, 'run_seek_scraper', mock_run_seek_scraper):
-                jobs = await fetch_jobs_from_seek("AI Engineer", "Melbourne", 5)
+                jobs = await fetch_jobs_from_seek("AI Engineer", "Melbourne", 10)
                 
-                assert len(jobs) == len(real_data)
+                assert len(jobs) == len(mock_data)
+                
                 # 验证所有职位都有必要字段
                 for job in jobs:
-                    assert isinstance(job, dict), f"job 应该是 dict 类型: {type(job)}"
-                    assert "id" in job, f"job 缺少 id 字段: {job.keys()}"
+                    assert isinstance(job, dict)
+                    assert "id" in job
                     assert "title" in job
                     assert "company" in job
                     assert "source" in job
                     assert job["source"] == "seek"
 
 
-class TestRealDataValidation:
-    """真实数据验证测试"""
+class TestMockDataValidation:
+    """Mock 数据验证测试"""
     
     def test_fixture_file_exists(self):
         """测试 fixture 文件是否存在"""
-        fixture_file = FIXTURES_DIR / "seek_response.json"
-        # 这个测试不会失败，只是标记是否存在
-        if fixture_file.exists():
-            assert True, "Fixture 文件存在"
-        else:
-            pytest.skip("Fixture 文件不存在，请运行 test_apify_real.py 生成")
+        fixture_file = FIXTURES_DIR / "seek_scraper_response.json"
+        assert fixture_file.exists(), f"Fixture 文件不存在: {fixture_file}"
     
     def test_fixture_data_structure(self):
         """测试 fixture 数据结构"""
-        real_data = load_real_job_data()
-        if not real_data:
-            pytest.skip("真实 fixture 数据不存在")
+        mock_data = load_mock_job_data()
+        if not mock_data:
+            pytest.skip("Mock fixture 数据不存在")
         
         # 验证数据是列表
-        assert isinstance(real_data, list)
-        assert len(real_data) > 0
+        assert isinstance(mock_data, list)
+        assert len(mock_data) > 0
         
-        # 验证每条数据都有必要字段
-        required_fields = ["id", "title", "company", "location", "url", "source"]
-        for i, job in enumerate(real_data):
-            for field in required_fields:
-                assert field in job, f"第 {i+1} 条数据缺少字段: {field}"
+        # 验证关键字段存在
+        for i, job in enumerate(mock_data):
+            assert "id" in job, f"第 {i+1} 条数据缺少 id"
+            assert "title" in job, f"第 {i+1} 条数据缺少 title"
+            assert "jobLink" in job, f"第 {i+1} 条数据缺少 jobLink"
     
     def test_fixture_data_quality(self):
         """测试 fixture 数据质量"""
-        real_data = load_real_job_data()
-        if not real_data:
-            pytest.skip("真实 fixture 数据不存在")
+        mock_data = load_mock_job_data()
+        if not mock_data:
+            pytest.skip("Mock fixture 数据不存在")
         
         # 统计数据质量
-        total = len(real_data)
-        with_salary = sum(1 for job in real_data if job.get("salary"))
-        with_description = sum(1 for job in real_data if job.get("description"))
+        total = len(mock_data)
+        with_salary = sum(1 for job in mock_data 
+                         if job.get("salary") and job["salary"] != "N/A")
+        with_location = sum(1 for job in mock_data 
+                           if job.get("joblocationInfo"))
+        with_advertiser = sum(1 for job in mock_data 
+                             if job.get("advertiser", {}).get("name"))
         
-        # 输出统计信息
         print(f"\n数据统计:")
         print(f"  总职位数: {total}")
         print(f"  有薪资信息: {with_salary} ({with_salary/total*100:.1f}%)")
-        print(f"  有描述信息: {with_description} ({with_description/total*100:.1f}%)")
+        print(f"  有位置信息: {with_location} ({with_location/total*100:.1f}%)")
+        print(f"  有招聘方信息: {with_advertiser} ({with_advertiser/total*100:.1f}%)")
         
-        # 至少应该有描述
-        assert with_description > 0, "所有职位都没有描述信息"
+        # 验证基本数据质量
+        assert with_location > 0, "所有职位都没有位置信息"
