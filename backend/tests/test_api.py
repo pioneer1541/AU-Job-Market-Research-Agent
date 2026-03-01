@@ -2,14 +2,39 @@
 API 端点测试 - 使用 mock 数据，不调用真实外部 API
 """
 
+import asyncio
 import pytest
-from fastapi.testclient import TestClient
+import httpx
 
 from backend.main import app
 
 
+class LocalASGIClient:
+    """Sync wrapper around httpx ASGITransport to avoid TestClient deadlock."""
+
+    def __init__(self, app):
+        self._transport = httpx.ASGITransport(app=app)
+        self._base_url = "http://testserver"
+
+    async def _request_async(self, method: str, url: str, **kwargs):
+        async with httpx.AsyncClient(
+            transport=self._transport,
+            base_url=self._base_url,
+        ) as client:
+            return await client.request(method, url, **kwargs)
+
+    def request(self, method: str, url: str, **kwargs):
+        return asyncio.run(self._request_async(method, url, **kwargs))
+
+    def get(self, url: str, **kwargs):
+        return self.request("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs):
+        return self.request("POST", url, **kwargs)
+
+
 # 创建测试客户端
-client = TestClient(app)
+client = LocalASGIClient(app)
 
 
 class TestHealthEndpoint:

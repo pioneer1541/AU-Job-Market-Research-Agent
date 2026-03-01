@@ -43,3 +43,41 @@
 
 ## Notes
 - The new integration tests are designed to avoid real external API calls by using in-process FastAPI `TestClient` and mocked `httpx.Client` transport in frontend client tests.
+
+---
+
+## Re-run Results (2026-03-01, current task)
+
+### Goal
+- Activate virtual environment and run integration tests
+- If failures occur, fix issues
+- Run all backend tests
+- Record all test results
+
+### Commands and Outcomes
+
+1. Integration tests (`source .venv/bin/activate && python -m pytest tests/test_integration.py -v`)
+- Result: failed
+- Reason: `/home/pioneer1541/job-market-research-agent/.venv/bin/python: No module named pytest`
+
+2. Backend full test suite (`source .venv/bin/activate && python -m pytest backend/tests -v`)
+- Result: blocked (same dependency issue)
+- Reason: `pytest` is not installed in `.venv`
+
+3. Attempted dependency install (`source .venv/bin/activate && python -m pip install -r requirements-dev.txt`)
+- Result: failed
+- Reason: network/DNS restricted in current environment; cannot fetch `pytest` from PyPI
+
+4. Offline install attempt (`source .venv/bin/activate && python -m pip install --no-index pytest`)
+- Result: failed
+- Reason: no local wheel/cache for `pytest`
+
+5. Fallback syntax checks (best-effort verification)
+- Command: `source .venv/bin/activate && python -m py_compile tests/test_integration.py`
+- Result: passed
+- Command: `source .venv/bin/activate && python -m py_compile backend/tests/test_api.py backend/tests/test_graph.py backend/tests/test_apify.py backend/tests/test_llm.py backend/tests/unit/test_main.py`
+- Result: passed
+
+### Fix Status
+- No code-level test failures were reached because `pytest` could not run.
+- No application code fixes were applied in this run.

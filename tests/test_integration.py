@@ -10,11 +10,12 @@
 """
 
 from pathlib import Path
+import asyncio
 import sys
 from urllib.parse import urlparse
 
 import pytest
-from fastapi.testclient import TestClient
+import httpx
 
 # Ensure project root is importable when running this file directly.
 project_root = Path(__file__).resolve().parent.parent
@@ -25,10 +26,34 @@ from frontend.utils.api import APIClient, APIError
 import frontend.utils.api as api_module
 
 
+class LocalASGIClient:
+    """Sync wrapper around httpx ASGITransport to avoid TestClient deadlock."""
+
+    def __init__(self, app):
+        self._transport = httpx.ASGITransport(app=app)
+        self._base_url = "http://testserver"
+
+    async def _request_async(self, method: str, url: str, **kwargs):
+        async with httpx.AsyncClient(
+            transport=self._transport,
+            base_url=self._base_url,
+        ) as client:
+            return await client.request(method, url, **kwargs)
+
+    def request(self, method: str, url: str, **kwargs):
+        return asyncio.run(self._request_async(method, url, **kwargs))
+
+    def get(self, url: str, **kwargs):
+        return self.request("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs):
+        return self.request("POST", url, **kwargs)
+
+
 @pytest.fixture(scope="module")
 def backend_client():
     """FastAPI in-process test client."""
-    return TestClient(app)
+    return LocalASGIClient(app)
 
 
 def test_backend_health_endpoint(backend_client):

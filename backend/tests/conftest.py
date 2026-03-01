@@ -1,6 +1,31 @@
 """Pytest configuration and fixtures."""
 
+import asyncio
+import inspect
+
 import pytest
+
+
+def pytest_configure(config):
+    """Register local async marker fallback when pytest-asyncio is unavailable."""
+    config.addinivalue_line(
+        "markers",
+        "asyncio: run test coroutine using local asyncio fallback",
+    )
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem):
+    """Run coroutine test functions without requiring pytest-asyncio plugin."""
+    if inspect.iscoroutinefunction(pyfuncitem.obj):
+        kwargs = {
+            name: pyfuncitem.funcargs[name]
+            for name in pyfuncitem._fixtureinfo.argnames
+            if name in pyfuncitem.funcargs
+        }
+        asyncio.run(pyfuncitem.obj(**kwargs))
+        return True
+    return None
 
 
 @pytest.fixture
