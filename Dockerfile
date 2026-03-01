@@ -30,6 +30,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# 运行阶段补齐 PDF 渲染依赖：
+# - WeasyPrint 依赖 pango/pixbuf/ffi/mime 数据
+# - Matplotlib 中文字体依赖 Noto CJK
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf2.0-0 \
+        libffi-dev \
+        shared-mime-info \
+        fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /opt/venv /opt/venv
 COPY backend ./backend
 COPY .env.example ./.env.example
