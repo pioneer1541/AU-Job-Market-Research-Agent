@@ -467,8 +467,76 @@ class ReportGenerator:
         if not HAS_MATPLOTLIB:
             return None
 
-        preferred_fonts = ["Noto Sans CJK SC", "SimHei", "Microsoft YaHei"]
+        # 强制刷新字体管理器，避免容器内字体缓存未更新导致识别失败。
+        try:
+            font_manager._load_fontmanager(try_read_cache=False)
+            logger.info("已强制跳过缓存重载 matplotlib 字体管理器。")
+        except TypeError:
+            # 兼容旧版本 matplotlib（不支持 try_read_cache 参数）。
+            font_manager._load_fontmanager()
+            logger.info("已重载 matplotlib 字体管理器（旧版接口）。")
+        except Exception as exc:
+            logger.warning("重载 matplotlib 字体管理器失败，将继续尝试其他方式: %s", exc)
+
+        # 尝试删除字体缓存文件并重建，提升首次启动场景的字体发现概率。
+        try:
+            cache_dir = Path(matplotlib.get_cachedir())
+            for cache_file in cache_dir.glob("fontlist-*.json"):
+                cache_file.unlink(missing_ok=True)
+                logger.info("已删除 matplotlib 字体缓存文件: %s", cache_file)
+        except Exception as exc:
+            logger.warning("删除 matplotlib 字体缓存文件失败: %s", exc)
+
+        try:
+            if hasattr(font_manager, "_rebuild"):
+                font_manager._rebuild()
+                logger.info("已调用 font_manager._rebuild() 重建字体缓存。")
+        except Exception as exc:
+            logger.warning("调用 font_manager._rebuild() 失败: %s", exc)
+
+        # 主动扫描常见系统字体目录，兼容 Railway / Debian 镜像字体路径差异。
+        font_dirs = [
+            Path("/usr/share/fonts"),
+            Path("/usr/local/share/fonts"),
+            Path("/usr/share/fonts/opentype/noto"),
+            Path("/usr/share/fonts/truetype/noto"),
+            Path("/usr/share/fonts/truetype/noto-cjk"),
+            Path("/app/.fonts"),
+            Path("/home/railway/.fonts"),
+            Path.home() / ".fonts",
+        ]
+        scanned_files = 0
+        for font_dir in font_dirs:
+            if not font_dir.exists():
+                continue
+            for pattern in ("*.ttf", "*.otf", "*.ttc"):
+                for font_file in font_dir.rglob(pattern):
+                    try:
+                        font_manager.fontManager.addfont(str(font_file))
+                        scanned_files += 1
+                    except Exception:
+                        # 个别字体文件解析失败不影响整体流程，跳过即可。
+                        continue
+        if scanned_files:
+            logger.info("已从系统目录追加扫描字体文件数量: %s", scanned_files)
+
+        preferred_fonts = [
+            "Noto Sans CJK SC",
+            "Noto Sans CJK",
+            "Noto Sans SC",
+            "Source Han Sans CN",
+            "SimHei",
+            "Microsoft YaHei",
+            "PingFang SC",
+            "WenQuanYi Zen Hei",
+        ]
         available_font_names = {f.name for f in font_manager.fontManager.ttflist}
+        detected_cjk_fonts = sorted(
+            name
+            for name in available_font_names
+            if re.search(r"(noto|cjk|han|hei|yahei|pingfang|wenquanyi|song|kai|fang)", name, re.IGNORECASE)
+        )
+        logger.info("检测到的候选中文字体列表: %s", detected_cjk_fonts[:60])
         for font_name in preferred_fonts:
             if font_name in available_font_names:
                 logger.info("检测到可用中文字体: %s", font_name)
@@ -484,11 +552,28 @@ class ReportGenerator:
         if not HAS_MATPLOTLIB or not labels or not values or sum(values) <= 0:
             return ""
 
+        # 绘图前强制重新加载字体管理器，避免复用旧缓存导致中文字体不可见。
+        try:
+            font_manager._load_fontmanager(try_read_cache=False)
+            logger.info("饼图绘制前已强制刷新 matplotlib 字体管理器。")
+        except TypeError:
+            font_manager._load_fontmanager()
+            logger.info("饼图绘制前已刷新 matplotlib 字体管理器（旧版接口）。")
+        except Exception as exc:
+            logger.warning("饼图绘制前刷新字体管理器失败: %s", exc)
+
         font_prop = self._detect_chinese_font()
+        if font_prop is not None:
+            logger.info("饼图最终使用字体: %s", font_prop.get_name())
+        else:
+            logger.warning("饼图最终使用 matplotlib 默认字体（未检测到中文字体）。")
 
         # 配置字体回退链，兼容不同系统镜像。
         plt.rcParams["font.sans-serif"] = [
             "Noto Sans CJK SC",
+            "Noto Sans CJK",
+            "Noto Sans SC",
+            "Source Han Sans CN",
             "SimHei",
             "Microsoft YaHei",
             "PingFang SC",
