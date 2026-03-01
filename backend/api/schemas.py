@@ -19,6 +19,7 @@ class JobListing(BaseModel):
     url: str = Field(default="", description="职位链接")
     source: str = Field(default="unknown", description="数据来源")
     posted_date: Optional[str] = Field(None, description="发布日期")
+    num_applicants: Optional[int] = Field(None, description="申请人数")
 
 
 class JobAnalysis(BaseModel):
@@ -42,6 +43,7 @@ class JobDetailResponse(BaseModel):
     url: str = ""
     source: str = "unknown"
     posted_date: Optional[str] = None
+    num_applicants: Optional[int] = None
     analysis: Optional[JobAnalysis] = None
 
 
@@ -77,6 +79,7 @@ class MarketInsights(BaseModel):
     competition_intensity: dict = Field(default_factory=dict, description="竞争强度统计")
     skill_profile: dict = Field(default_factory=dict, description="技能提取与画像")
     employer_profile: dict = Field(default_factory=dict, description="雇主分析画像")
+    top_jobs: dict = Field(default_factory=dict, description="TOP 职位分析（申请人数/薪资）")
     report_meta: dict = Field(default_factory=dict, description="报告元信息")
     report_sections: dict[str, str] = Field(default_factory=dict, description="模块化报告章节")
 

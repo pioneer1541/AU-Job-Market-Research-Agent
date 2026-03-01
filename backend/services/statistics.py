@@ -65,6 +65,18 @@ def _safe_div(numerator: float, denominator: float) -> float:
     return numerator / denominator
 
 
+def _to_int(value: Any) -> Optional[int]:
+    """将任意输入安全转换为 int，失败时返回 None。"""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_salary_text(salary_text: Optional[str]) -> Optional[dict[str, Any]]:
     """
     解析薪资字符串并返回统一结构:
@@ -138,6 +150,66 @@ def parse_salary_text(salary_text: Optional[str]) -> Optional[dict[str, Any]]:
 
 class StatisticsService:
     """职位市场统计计算服务。"""
+
+    def get_top_jobs(self, jobs: list[dict[str, Any]], top_n: int = 3) -> dict[str, list[dict[str, Any]]]:
+        """
+        返回两个 TOPN 职位列表：
+        1) 按申请人数排序
+        2) 按薪资上限（年化）排序
+        """
+        # 兼容不同来源字段名，优先使用数值化后的申请人数。
+        applicants_candidates = ["num_applicants", "numApplicants", "applicants", "application_count", "apply_count"]
+        top_by_applicants: list[dict[str, Any]] = []
+        for job in jobs:
+            applicants: Optional[int] = None
+            for field in applicants_candidates:
+                if field in job and job.get(field) is not None:
+                    applicants = _to_int(job.get(field))
+                    if applicants is not None:
+                        break
+            if applicants is None:
+                continue
+            top_by_applicants.append(
+                {
+                    "title": str(job.get("title", "")).strip(),
+                    "company": str(job.get("company", "")).strip(),
+                    "num_applicants": applicants,
+                    "url": str(job.get("url", "")).strip(),
+                }
+            )
+
+        top_by_applicants = sorted(
+            top_by_applicants,
+            key=lambda item: item.get("num_applicants", 0),
+            reverse=True,
+        )[:top_n]
+
+        top_by_salary: list[dict[str, Any]] = []
+        for job in jobs:
+            parsed_salary = parse_salary_text(job.get("salary"))
+            if not parsed_salary:
+                continue
+            top_by_salary.append(
+                {
+                    "title": str(job.get("title", "")).strip(),
+                    "company": str(job.get("company", "")).strip(),
+                    "salary": str(parsed_salary.get("raw") or job.get("salary") or "").strip(),
+                    "salary_max_annual": round(float(parsed_salary.get("max_annual", 0)), 0),
+                    "currency": str(parsed_salary.get("currency", "AUD")),
+                    "url": str(job.get("url", "")).strip(),
+                }
+            )
+
+        top_by_salary = sorted(
+            top_by_salary,
+            key=lambda item: item.get("salary_max_annual", 0),
+            reverse=True,
+        )[:top_n]
+
+        return {
+            "top_by_applicants": top_by_applicants,
+            "top_by_salary": top_by_salary,
+        }
 
     def filter_low_salary_jobs(self, jobs: list[dict[str, Any]]) -> dict[str, Any]:
         """
@@ -441,6 +513,7 @@ class StatisticsService:
         competition_intensity = self.analyze_competition_intensity(jobs)
         skill_profile = self.extract_skill_profile(jobs, analysis_results)
         employer_profile = self.analyze_employers(jobs)
+        top_jobs = self.get_top_jobs(jobs, top_n=3)
 
         exp_dist = Counter(
             (item.get("experience_level") or "Unknown")
@@ -456,6 +529,7 @@ class StatisticsService:
             "competition_intensity": competition_intensity,
             "skill_profile": skill_profile,
             "employer_profile": employer_profile,
+            "top_jobs": top_jobs,
             # 兼容旧字段
             "top_skills": skill_profile.get("top_skills", []),
             "experience_distribution": dict(exp_dist),

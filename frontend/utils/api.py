@@ -105,6 +105,7 @@ def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     competition_intensity = _extract_module_dict(market_insights, "competition_intensity")
     skill_profile = _extract_module_dict(market_insights, "skill_profile")
     employer_profile = _extract_module_dict(market_insights, "employer_profile")
+    top_jobs = _extract_module_dict(market_insights, "top_jobs")
 
     top_skills = _normalize_skills(
         _pick_first(market_insights, ["top_skills", "skills", "topSkills"], [])
@@ -187,6 +188,7 @@ def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "competition_intensity": competition_intensity,
         "skill_profile": skill_profile,
         "employer_profile": employer_profile,
+        "top_jobs": top_jobs,
         "report_meta": _extract_module_dict(market_insights, "report_meta"),
         "report_sections": market_insights.get("report_sections", {}) if isinstance(market_insights.get("report_sections"), dict) else {},
     }

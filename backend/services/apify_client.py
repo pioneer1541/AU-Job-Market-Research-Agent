@@ -28,6 +28,7 @@ class JobListing(TypedDict):
     url: str
     source: str
     posted_date: Optional[str]
+    num_applicants: Optional[int]
 
 
 class ApifyError(Exception):
@@ -428,7 +429,14 @@ class ApifyClient:
                 datetime.fromisoformat(posted_date.replace("Z", "+00:00"))
             except (ValueError, TypeError):
                 posted_date = None
-        
+
+        # 解析申请人数（Seek 字段通常为 numApplicants）
+        num_applicants = raw_job.get("numApplicants")
+        try:
+            num_applicants = int(num_applicants) if num_applicants is not None else None
+        except (TypeError, ValueError):
+            num_applicants = None
+
         return JobListing(
             id=job_id,
             title=title,
@@ -439,6 +447,7 @@ class ApifyClient:
             url=url,
             source="seek",
             posted_date=posted_date,
+            num_applicants=num_applicants,
         )
 
 

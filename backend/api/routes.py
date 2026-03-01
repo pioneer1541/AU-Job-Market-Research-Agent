@@ -30,6 +30,7 @@ from backend.api.schemas import (
     StatusResponse,
 )
 from backend.services.database import get_database_service
+from backend.services.statistics import StatisticsService
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ MOCK_JOBS: dict[str, JobListing] = {
         url="https://seek.com.au/job/001",
         source="seek",
         posted_date="2026-02-28",
+        num_applicants=132,
     ),
     "job-002": JobListing(
         id="job-002",
@@ -62,6 +64,7 @@ MOCK_JOBS: dict[str, JobListing] = {
         url="https://seek.com.au/job/002",
         source="seek",
         posted_date="2026-02-27",
+        num_applicants=97,
     ),
     "job-003": JobListing(
         id="job-003",
@@ -73,6 +76,7 @@ MOCK_JOBS: dict[str, JobListing] = {
         url="https://indeed.com/job/003",
         source="indeed",
         posted_date="2026-02-26",
+        num_applicants=81,
     ),
 }
 
@@ -155,6 +159,7 @@ def _convert_state_jobs_to_api_jobs(raw_jobs: list[dict], max_results: int) -> l
                     url=str(item.get("url", "")),
                     source=str(item.get("source", "unknown")),
                     posted_date=item.get("posted_date"),
+                    num_applicants=item.get("num_applicants", item.get("numApplicants")),
                 )
             )
         except Exception as e:
@@ -183,6 +188,12 @@ def _build_market_insights_from_graph(jobs: list[JobListing], graph_result: dict
         if min_salary is not None and max_salary is not None:
             avg_salary_range = f"{currency} {int(min_salary):,} - {int(max_salary):,}"
 
+    # 兼容真实流程与旧数据：优先使用统计服务结果，缺失时基于 jobs 兜底计算。
+    top_jobs = market_insights.get("top_jobs") or StatisticsService().get_top_jobs(
+        jobs=[job.model_dump() for job in jobs],
+        top_n=3,
+    )
+
     return MarketInsights(
         total_jobs=len(jobs),
         avg_salary_range=avg_salary_range,
@@ -196,6 +207,7 @@ def _build_market_insights_from_graph(jobs: list[JobListing], graph_result: dict
         competition_intensity=market_insights.get("competition_intensity", {}) or {},
         skill_profile=market_insights.get("skill_profile", {}) or {},
         employer_profile=market_insights.get("employer_profile", {}) or {},
+        top_jobs=top_jobs if isinstance(top_jobs, dict) else {},
         report_meta=(graph_result.get("processed_data", {}) or {}).get("report_meta", {}) or {},
         report_sections=(graph_result.get("processed_data", {}) or {}).get("report_sections", {}) or {},
     )
@@ -204,6 +216,7 @@ def _build_market_insights_from_graph(jobs: list[JobListing], graph_result: dict
 def _build_mock_analyze_response(query: str, location: Optional[str], max_results: int) -> AnalyzeResponse:
     """构建原有 mock 分析响应，作为失败兜底。"""
     result_jobs = _build_mock_search_jobs(query=query, location=location, max_results=max_results)
+    top_jobs = StatisticsService().get_top_jobs(jobs=[job.model_dump() for job in result_jobs], top_n=3)
 
     insights = MarketInsights(
         total_jobs=len(result_jobs),
@@ -212,6 +225,7 @@ def _build_mock_analyze_response(query: str, location: Optional[str], max_result
         top_companies=["TechCorp Melbourne", "DataDriven Inc", "Innovation Labs"],
         experience_distribution={"Senior": 2, "Mid-Senior": 1},
         location_distribution={"Melbourne, VIC": 1, "Sydney, NSW": 1, "Remote": 1},
+        top_jobs=top_jobs,
     )
 
     report = f"""# {query} 市场分析报告

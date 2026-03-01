@@ -32,6 +32,7 @@ class ReportGenerator:
         competition = market_insights.get("competition_intensity", {}) or {}
         skills = market_insights.get("skill_profile", {}) or {}
         employers = market_insights.get("employer_profile", {}) or {}
+        top_jobs = market_insights.get("top_jobs", {}) or {}
         salary_filter_stats = processed_data.get("salary_filter_stats", {}) or {}
 
         generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -126,6 +127,26 @@ class ReportGenerator:
             f"{employer_lines}\n"
         )
 
+        top_apply_jobs = top_jobs.get("top_by_applicants", [])[:3]
+        top_apply_lines = "\n".join(
+            f"  - {idx}. {item.get('title', 'N/A')} | {item.get('company', 'N/A')} | 申请人数: {item.get('num_applicants', 0)} | {item.get('url', '')}"
+            for idx, item in enumerate(top_apply_jobs, start=1)
+        ) or "  - 暂无申请人数数据"
+
+        top_salary_jobs = top_jobs.get("top_by_salary", [])[:3]
+        top_salary_lines = "\n".join(
+            f"  - {idx}. {item.get('title', 'N/A')} | {item.get('company', 'N/A')} | 薪资: {item.get('salary', 'N/A')} | {item.get('url', '')}"
+            for idx, item in enumerate(top_salary_jobs, start=1)
+        ) or "  - 暂无薪资数据"
+
+        sections["H"] = (
+            "## H. TOP3 职位\n"
+            "- 申请人数最多 TOP3:\n"
+            f"{top_apply_lines}\n"
+            "- 薪资最高 TOP3:\n"
+            f"{top_salary_lines}\n"
+        )
+
         report = "\n".join(
             [
                 "# Job Market Research Report",
@@ -138,6 +159,7 @@ class ReportGenerator:
                 sections["E"],
                 sections["F"],
                 sections["G"],
+                sections["H"],
             ]
         )
 
@@ -147,6 +169,6 @@ class ReportGenerator:
             "report_meta": {
                 "query": query,
                 "generated_at": generated_at,
-                "section_order": ["A", "B", "C", "D", "E", "F", "G"],
+                "section_order": ["A", "B", "C", "D", "E", "F", "G", "H"],
             },
         }

@@ -233,6 +233,7 @@ salary_analysis: Dict[str, Any] = market_insights.get("salary_analysis", {}) or 
 competition_intensity: Dict[str, Any] = market_insights.get("competition_intensity", {}) or {}
 skill_profile: Dict[str, Any] = market_insights.get("skill_profile", {}) or {}
 employer_profile: Dict[str, Any] = market_insights.get("employer_profile", {}) or {}
+top_jobs: Dict[str, Any] = market_insights.get("top_jobs", {}) or {}
 
 jobs_for_chart = normalize_jobs_for_chart(jobs)
 skills_from_profile = skill_profile.get("top_skills", []) if isinstance(skill_profile, dict) else []
@@ -358,6 +359,47 @@ with st.expander("查看雇主画像解读", expanded=False):
         st.markdown(f"- 高频雇主包括：**{'、'.join(company_list[:5])}**。")
     else:
         st.markdown("- 当前样本未提供 Top 雇主列表，图表已根据职位公司字段自动聚合。")
+
+# H. TOP3 职位分析
+render_section_title("H. TOP3 职位分析", "申请人数与薪资双维度的头部岗位")
+top_by_applicants: List[Dict[str, Any]] = top_jobs.get("top_by_applicants", []) if isinstance(top_jobs, dict) else []
+top_by_salary: List[Dict[str, Any]] = top_jobs.get("top_by_salary", []) if isinstance(top_jobs, dict) else []
+
+left_col, right_col = st.columns(2)
+with left_col:
+    st.markdown("#### 申请人数最多 TOP3")
+    if top_by_applicants:
+        for idx, item in enumerate(top_by_applicants[:3], start=1):
+            raw_applicants = item.get("num_applicants", 0)
+            try:
+                applicants = int(raw_applicants)
+            except (TypeError, ValueError):
+                applicants = 0
+            st.markdown(
+                (
+                    f"**{idx}. {item.get('title', '未知职位')}**  \n"
+                    f"公司：{item.get('company', '未知公司')}  \n"
+                    f"申请人数：{applicants:,}  \n"
+                    f"招聘网址：{item.get('url', 'N/A')}"
+                )
+            )
+    else:
+        st.info("暂无申请人数数据。")
+
+with right_col:
+    st.markdown("#### 薪资最高 TOP3")
+    if top_by_salary:
+        for idx, item in enumerate(top_by_salary[:3], start=1):
+            st.markdown(
+                (
+                    f"**{idx}. {item.get('title', '未知职位')}**  \n"
+                    f"公司：{item.get('company', '未知公司')}  \n"
+                    f"薪资：{item.get('salary', '暂无数据')}  \n"
+                    f"招聘网址：{item.get('url', 'N/A')}"
+                )
+            )
+    else:
+        st.info("暂无薪资数据。")
 
 with st.expander("查看完整分析报告（Markdown）", expanded=False):
     if report.strip():

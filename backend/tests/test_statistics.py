@@ -13,6 +13,8 @@ def _build_jobs() -> list[dict]:
             "company": "Tech A",
             "location": "Melbourne",
             "salary": "$120k - $150k",
+            "url": "https://example.com/job-1",
+            "num_applicants": 88,
             "description": "Python Django AWS",
             "posted_date": "2026-02-20",
         },
@@ -22,6 +24,8 @@ def _build_jobs() -> list[dict]:
             "company": "Tech B",
             "location": "Sydney",
             "salary": "AUD 100000 - 130000",
+            "url": "https://example.com/job-2",
+            "num_applicants": 137,
             "description": "SQL Airflow Spark",
             "posted_date": "2026-02-21",
         },
@@ -30,7 +34,9 @@ def _build_jobs() -> list[dict]:
             "title": "ML Engineer",
             "company": "Tech A",
             "location": "Remote",
-            "salary": None,
+            "salary": "$160k - $200k",
+            "url": "https://example.com/job-3",
+            "num_applicants": 66,
             "description": "Python TensorFlow Docker",
             "posted_date": "2026-02-22",
         },
@@ -133,11 +139,27 @@ class TestStatisticsService:
         assert "competition_intensity" in insights
         assert "skill_profile" in insights
         assert "employer_profile" in insights
+        assert "top_jobs" in insights
 
         # 验证兼容字段仍存在
         assert "top_skills" in insights
         assert "salary_stats" in insights
         assert isinstance(insights["skill_profile"].get("top_skills", []), list)
+
+    def test_get_top_jobs(self):
+        service = StatisticsService()
+        jobs = _build_jobs()
+
+        top_jobs = service.get_top_jobs(jobs, top_n=3)
+        top_by_applicants = top_jobs.get("top_by_applicants", [])
+        top_by_salary = top_jobs.get("top_by_salary", [])
+
+        assert len(top_by_applicants) == 3
+        assert top_by_applicants[0]["title"] == "Data Engineer"
+        assert top_by_applicants[0]["num_applicants"] == 137
+        assert len(top_by_salary) == 3
+        assert top_by_salary[0]["title"] == "ML Engineer"
+        assert top_by_salary[0]["salary_max_annual"] >= top_by_salary[1]["salary_max_annual"]
 
     def test_filter_low_salary_jobs(self):
         service = StatisticsService()
@@ -179,7 +201,27 @@ class TestReportGenerator:
                 "salary_coverage_pct": 66.67,
                 "analysis_coverage_pct": 100.0,
                 "date_range": {"start": "2026-02-20", "end": "2026-02-22"},
-            }
+            },
+            "top_jobs": {
+                "top_by_applicants": [
+                    {
+                        "title": "Data Engineer",
+                        "company": "Tech B",
+                        "num_applicants": 137,
+                        "url": "https://example.com/job-2",
+                    }
+                ],
+                "top_by_salary": [
+                    {
+                        "title": "ML Engineer",
+                        "company": "Tech A",
+                        "salary": "$160k - $200k",
+                        "salary_max_annual": 200000,
+                        "currency": "AUD",
+                        "url": "https://example.com/job-3",
+                    }
+                ],
+            },
         }
         processed_data = {
             "salary_filter_stats": {
@@ -204,3 +246,6 @@ class TestReportGenerator:
         assert "低薪过滤后职位数: 3" in report
         assert "过滤职位数: 2" in report
         assert "时薪 < 24 AUD 或年薪 < 50000 AUD" in report
+        assert "## H. TOP3 职位" in report
+        assert "申请人数最多 TOP3" in report
+        assert "薪资最高 TOP3" in report
