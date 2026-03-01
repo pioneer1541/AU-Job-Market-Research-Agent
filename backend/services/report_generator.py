@@ -32,6 +32,7 @@ class ReportGenerator:
         applicant = market_insights.get("applicant_analysis", {}) or {}
         competition = market_insights.get("competition_intensity", {}) or {}
         skills = market_insights.get("skill_profile", {}) or {}
+        deep_analysis = market_insights.get("deep_analysis", {}) or {}
         employers = market_insights.get("employer_profile", {}) or {}
         top_jobs = market_insights.get("top_jobs", {}) or {}
         salary_filter_stats = processed_data.get("salary_filter_stats", {}) or {}
@@ -168,6 +169,47 @@ class ReportGenerator:
             f"{top_salary_lines}\n"
         )
 
+        hard_skill_lines = "\n".join(
+            f"  - {item.get('item')}: {item.get('count')}"
+            for item in deep_analysis.get("top_hard_skills", [])[:10]
+        ) or "  - 暂无硬技能数据"
+        soft_skill_lines = "\n".join(
+            f"  - {item.get('item')}: {item.get('count')}"
+            for item in deep_analysis.get("top_soft_skills", [])[:10]
+        ) or "  - 暂无软技能数据"
+        industry_keyword_lines = "\n".join(
+            f"  - {item.get('item')}: {item.get('count')}"
+            for item in deep_analysis.get("top_industry_keywords", [])[:10]
+        ) or "  - 暂无行业关键词数据"
+        responsibility_lines = "\n".join(
+            f"  - {item.get('item')}: {item.get('count')}"
+            for item in deep_analysis.get("top_responsibility_themes", [])[:10]
+        ) or "  - 暂无职责主题数据"
+        qualification_lines = "\n".join(
+            f"  - {item.get('item')}: {item.get('count')}"
+            for item in deep_analysis.get("top_qualifications", [])[:10]
+        ) or "  - 暂无任职资格数据"
+        years_lines = "\n".join(
+            f"  - {bucket}: {count}"
+            for bucket, count in (deep_analysis.get("years_of_experience_distribution", {}) or {}).items()
+        ) or "  - 暂无经验年限数据"
+
+        sections["I"] = (
+            "## I. 深度分析\n"
+            "- 硬技能 Top10:\n"
+            f"{hard_skill_lines}\n"
+            "- 软技能 Top10:\n"
+            f"{soft_skill_lines}\n"
+            "- 行业关键词 Top10:\n"
+            f"{industry_keyword_lines}\n"
+            "- 职责主题 Top10:\n"
+            f"{responsibility_lines}\n"
+            "- 任职资格 Top10:\n"
+            f"{qualification_lines}\n"
+            "- 经验年限分布:\n"
+            f"{years_lines}\n"
+        )
+
         report = "\n".join(
             [
                 "# Job Market Research Report",
@@ -181,6 +223,7 @@ class ReportGenerator:
                 sections["F"],
                 sections["G"],
                 sections["H"],
+                sections["I"],
             ]
         )
 
@@ -190,6 +233,6 @@ class ReportGenerator:
             "report_meta": {
                 "query": query,
                 "generated_at": generated_at,
-                "section_order": ["A", "B", "C", "D", "E", "F", "G", "H"],
+                "section_order": ["A", "B", "C", "D", "E", "F", "G", "H", "I"],
             },
         }

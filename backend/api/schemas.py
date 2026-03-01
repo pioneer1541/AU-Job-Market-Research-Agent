@@ -25,6 +25,12 @@ class JobListing(BaseModel):
 class JobAnalysis(BaseModel):
     """职位分析结果"""
     job_id: str = Field(..., description="关联的职位ID")
+    hard_skills: list[str] = Field(default_factory=list, description="硬技能列表")
+    soft_skills: list[str] = Field(default_factory=list, description="软技能列表")
+    years_of_experience: Optional[str] = Field(None, description="经验年限")
+    industry_keywords: list[str] = Field(default_factory=list, description="行业关键词")
+    responsibility_themes: list[str] = Field(default_factory=list, description="职责主题")
+    qualifications: list[str] = Field(default_factory=list, description="任职资格")
     skills_required: list[str] = Field(default_factory=list, description="所需技能")
     experience_level: str = Field(default="", description="经验要求")
     salary_estimate: Optional[str] = Field(None, description="薪资估算")

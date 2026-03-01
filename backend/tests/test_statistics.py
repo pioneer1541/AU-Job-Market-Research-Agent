@@ -250,6 +250,14 @@ class TestReportGenerator:
                     "150k-200k": {"jobs": 1, "total_applicants": 66, "avg_applicants": 66.0},
                 },
             },
+            "deep_analysis": {
+                "top_hard_skills": [{"item": "Python", "count": 3}],
+                "top_soft_skills": [{"item": "沟通协作", "count": 2}],
+                "top_industry_keywords": [{"item": "SaaS", "count": 2}],
+                "top_responsibility_themes": [{"item": "后端开发", "count": 3}],
+                "top_qualifications": [{"item": "本科及以上", "count": 2}],
+                "years_of_experience_distribution": {"4-5年": 2, "6-8年": 1},
+            },
         }
         processed_data = {
             "salary_filter_stats": {
@@ -278,5 +286,9 @@ class TestReportGenerator:
         assert "按经验级别申请人数" in report
         assert "按薪资区间申请人数" in report
         assert "## H. TOP3 职位" in report
+        assert "## I. 深度分析" in report
+        assert "硬技能 Top10" in report
+        assert "经验年限分布" in report
         assert "申请人数最多 TOP3" in report
         assert "薪资最高 TOP3" in report
+        assert generated["report_meta"]["section_order"] == ["A", "B", "C", "D", "E", "F", "G", "H", "I"]

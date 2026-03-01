@@ -21,6 +21,12 @@ class JobListing(TypedDict):
 class AnalysisResult(TypedDict):
     """Analysis result for a single job"""
     job_id: str
+    hard_skills: list[str]
+    soft_skills: list[str]
+    years_of_experience: Optional[str]
+    industry_keywords: list[str]
+    responsibility_themes: list[str]
+    qualifications: list[str]
     skills_required: list[str]
     experience_level: str
     salary_estimate: Optional[str]

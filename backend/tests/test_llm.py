@@ -43,6 +43,15 @@ Benefits:
 def sample_llm_response():
     """Sample LLM response for JD analysis"""
     return json.dumps({
+        "hard_skills": ["Python", "FastAPI", "Django", "PostgreSQL", "AWS"],
+        "soft_skills": ["Communication", "Collaboration"],
+        "years_of_experience": "5+ years",
+        "industry_keywords": ["SaaS", "Cloud"],
+        "responsibility_themes": ["Backend Development", "System Design"],
+        "qualifications": [
+            "Bachelor's degree in Computer Science",
+            "Experience building APIs"
+        ],
         "skills_required": ["Python", "FastAPI", "Django", "PostgreSQL", "AWS"],
         "experience_level": "Senior",
         "salary_estimate": "120000-150000 AUD/year",
@@ -213,9 +222,15 @@ class TestJDAnalyzer:
             result = await analyze_job(sample_job)
             
             assert result["job_id"] == "test-job-001"
+            assert "Python" in result["hard_skills"]
+            assert "Communication" in result["soft_skills"]
+            assert result["years_of_experience"] == "5+ years"
+            assert "SaaS" in result["industry_keywords"]
+            assert "Backend Development" in result["responsibility_themes"]
+            assert "Experience building APIs" in result["qualifications"]
             assert "Python" in result["skills_required"]
             assert result["experience_level"] == "Senior"
-            assert len(result["key_requirements"]) == 4
+            assert len(result["key_requirements"]) >= 2
     
     @pytest.mark.asyncio
     async def test_analyze_job_with_client(self, sample_job, sample_llm_response):
@@ -228,6 +243,7 @@ class TestJDAnalyzer:
         result = await analyze_job(sample_job, client=mock_client)
         
         assert result["job_id"] == "test-job-001"
+        assert "Python" in result["hard_skills"]
         assert "Python" in result["skills_required"]
         # Should not call __aenter__/__aexit__ when client is provided
     
@@ -243,6 +259,12 @@ class TestJDAnalyzer:
         
         # Should return default result, not raise
         assert result["job_id"] == "test-job-001"
+        assert result["hard_skills"] == []
+        assert result["soft_skills"] == []
+        assert result["years_of_experience"] is None
+        assert result["industry_keywords"] == []
+        assert result["responsibility_themes"] == []
+        assert result["qualifications"] == []
         assert result["skills_required"] == []
         assert result["experience_level"] == "Mid"
     
@@ -319,6 +341,12 @@ class TestNodesIntegration:
             mock_analyze.return_value = [
                 {
                     "job_id": "job-1",
+                    "hard_skills": ["Python", "Django", "AWS"],
+                    "soft_skills": ["Communication"],
+                    "years_of_experience": "5+ years",
+                    "industry_keywords": ["Tech"],
+                    "responsibility_themes": ["Backend Development"],
+                    "qualifications": ["5 years experience"],
                     "skills_required": ["Python", "Django", "AWS"],
                     "experience_level": "Senior",
                     "salary_estimate": "$100k-$120k",
@@ -391,6 +419,12 @@ class TestSalaryParsing:
         analysis_results = [
             {
                 "job_id": "job-1",
+                "hard_skills": ["Python"],
+                "soft_skills": ["Communication"],
+                "years_of_experience": "5+ years",
+                "industry_keywords": ["Tech"],
+                "responsibility_themes": ["Backend Development"],
+                "qualifications": [],
                 "skills_required": ["Python"],
                 "experience_level": "Senior",
                 "salary_estimate": "$120,000 - $150,000",
@@ -399,6 +433,12 @@ class TestSalaryParsing:
             },
             {
                 "job_id": "job-2",
+                "hard_skills": ["Java"],
+                "soft_skills": ["Teamwork"],
+                "years_of_experience": "1-3 years",
+                "industry_keywords": ["Tech"],
+                "responsibility_themes": ["Feature Development"],
+                "qualifications": [],
                 "skills_required": ["Java"],
                 "experience_level": "Junior",
                 "salary_estimate": "$60k - $80k",

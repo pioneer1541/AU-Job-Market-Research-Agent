@@ -77,6 +77,30 @@ def _to_int(value: Any) -> Optional[int]:
         return None
 
 
+def _years_bucket(raw: Optional[str]) -> str:
+    """将经验年限文本归一到稳定分桶，便于聚合统计。"""
+    if not raw:
+        return "未知"
+    text = str(raw).strip().lower()
+    if not text:
+        return "未知"
+
+    # 从文本中提取首个数字，常见格式如 "3-5年"、"5+ years"。
+    match = re.search(r"(\d+)", text)
+    if not match:
+        return text
+    years = int(match.group(1))
+    if years <= 1:
+        return "0-1年"
+    if years <= 3:
+        return "2-3年"
+    if years <= 5:
+        return "4-5年"
+    if years <= 8:
+        return "6-8年"
+    return "8年以上"
+
+
 def parse_salary_text(salary_text: Optional[str]) -> Optional[dict[str, Any]]:
     """
     解析薪资字符串并返回统一结构:
@@ -407,6 +431,8 @@ class StatisticsService:
         series = [{"date": d, "count": c} for d, c in sorted(day_counter.items())]
         counts = [point["count"] for point in series]
         avg_daily = round(sum(counts) / len(counts), 2)
+        if len(counts) == 1:
+            return {"series": series, "trend": "flat", "avg_daily_postings": avg_daily}
 
         midpoint = max(1, len(counts) // 2)
         first_avg = sum(counts[:midpoint]) / len(counts[:midpoint])
@@ -576,6 +602,62 @@ class StatisticsService:
             "total_unique_skills": len(skill_counter),
         }
 
+    def extract_deep_analysis(
+        self,
+        analysis_results: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        """聚合 LLM 深度解析字段，用于报告 I 章节。"""
+        analysis_results = analysis_results or []
+
+        hard_skill_counter: Counter[str] = Counter()
+        soft_skill_counter: Counter[str] = Counter()
+        industry_keyword_counter: Counter[str] = Counter()
+        responsibility_theme_counter: Counter[str] = Counter()
+        qualification_counter: Counter[str] = Counter()
+        years_counter: Counter[str] = Counter()
+
+        for result in analysis_results:
+            for skill in result.get("hard_skills", []) or []:
+                if skill:
+                    hard_skill_counter[str(skill).strip()] += 1
+            for skill in result.get("soft_skills", []) or []:
+                if skill:
+                    soft_skill_counter[str(skill).strip()] += 1
+            for keyword in result.get("industry_keywords", []) or []:
+                if keyword:
+                    industry_keyword_counter[str(keyword).strip()] += 1
+            for theme in result.get("responsibility_themes", []) or []:
+                if theme:
+                    responsibility_theme_counter[str(theme).strip()] += 1
+            for qualification in result.get("qualifications", []) or []:
+                if qualification:
+                    qualification_counter[str(qualification).strip()] += 1
+            years_counter[_years_bucket(result.get("years_of_experience"))] += 1
+
+        return {
+            "top_hard_skills": [
+                {"item": k, "count": v}
+                for k, v in hard_skill_counter.most_common(10)
+            ],
+            "top_soft_skills": [
+                {"item": k, "count": v}
+                for k, v in soft_skill_counter.most_common(10)
+            ],
+            "top_industry_keywords": [
+                {"item": k, "count": v}
+                for k, v in industry_keyword_counter.most_common(10)
+            ],
+            "top_responsibility_themes": [
+                {"item": k, "count": v}
+                for k, v in responsibility_theme_counter.most_common(10)
+            ],
+            "top_qualifications": [
+                {"item": k, "count": v}
+                for k, v in qualification_counter.most_common(10)
+            ],
+            "years_of_experience_distribution": dict(years_counter),
+        }
+
     def analyze_employers(self, jobs: list[dict[str, Any]]) -> dict[str, Any]:
         if not jobs:
             return {
@@ -620,6 +702,7 @@ class StatisticsService:
         applicant_analysis = self.analyze_applicants(jobs, analysis_results)
         competition_intensity = self.analyze_competition_intensity(jobs)
         skill_profile = self.extract_skill_profile(jobs, analysis_results)
+        deep_analysis = self.extract_deep_analysis(analysis_results)
         employer_profile = self.analyze_employers(jobs)
         top_jobs = self.get_top_jobs(jobs, top_n=3)
 
@@ -637,6 +720,7 @@ class StatisticsService:
             "applicant_analysis": applicant_analysis,
             "competition_intensity": competition_intensity,
             "skill_profile": skill_profile,
+            "deep_analysis": deep_analysis,
             "employer_profile": employer_profile,
             "top_jobs": top_jobs,
             # 兼容旧字段
