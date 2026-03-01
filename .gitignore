@@ -35,12 +35,14 @@ env/
 
 # Environment variables
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.production.example
 
 # Testing
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 .tox/
 .nox/
@@ -64,3 +66,7 @@ data/
 *.json
 !backend/tests/fixtures/*.json
 !package.json
+
+# Local agent/tooling metadata
+.clawhub/
+.openclaw/
