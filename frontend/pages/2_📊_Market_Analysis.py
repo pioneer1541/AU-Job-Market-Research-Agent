@@ -1,7 +1,10 @@
 import streamlit as st
 import sys
 import re
-from typing import Any, Dict, List
+import time
+import uuid
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, '.')
 from components.charts import create_salary_chart, create_location_chart, create_skills_chart
@@ -36,8 +39,93 @@ def normalize_jobs_for_chart(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     return normalized
 
 
+def _render_error(message: str) -> None:
+    st.markdown(
+        (
+            "<div style='padding: 0.75rem 1rem; border-radius: 0.5rem;"
+            "border: 1px solid #f5c2c7; background: #f8d7da; color: #842029; margin: 0.5rem 0;'>"
+            f"<strong>分析失败：</strong>{message}</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_empty_state(title: str, description: str) -> None:
+    st.markdown(
+        (
+            "<div style='padding: 1.2rem; border-radius: 0.5rem; border: 1px dashed #bae6fd;"
+            "background: #f8fafc; margin-top: 0.8rem;'>"
+            f"<h4 style='margin:0;'>📭 {title}</h4>"
+            f"<p style='margin:0.4rem 0 0 0; color:#475569;'>{description}</p>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _append_analysis_history(
+    query: str,
+    location: Optional[str],
+    max_results: int,
+    result: Dict[str, Any],
+) -> None:
+    market_insights = result.get("market_insights", {}) or {}
+    history = st.session_state.setdefault("analysis_history", [])
+    history.insert(
+        0,
+        {
+            "id": f"a-{uuid.uuid4().hex[:10]}",
+            "type": "analysis",
+            "query": query,
+            "location": location or "",
+            "max_results": max_results,
+            "results_count": market_insights.get("total_jobs", len(result.get("jobs", []))),
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+        },
+    )
+    st.session_state["analysis_history"] = history[:100]
+
+
+def _execute_analysis(query: str, location: Optional[str], max_results: int) -> None:
+    client = APIClient(st.session_state["api_url"])
+    progress = st.progress(0, text="准备分析任务...")
+
+    try:
+        progress.progress(20, text="正在请求市场数据...")
+        time.sleep(0.1)
+        result = client.analyze_market(
+            query=query,
+            location=location,
+            max_results=max_results,
+        )
+        progress.progress(75, text="正在生成可视化数据...")
+        time.sleep(0.1)
+        st.session_state["market_analysis_result"] = result
+        _append_analysis_history(
+            query=query,
+            location=location,
+            max_results=max_results,
+            result=result,
+        )
+        progress.progress(100, text="分析完成")
+        st.success("分析完成，已写入历史记录。")
+    except APIError as exc:
+        _render_error(str(exc))
+    except Exception as exc:
+        _render_error(f"发生未知错误：{exc}")
+    finally:
+        time.sleep(0.05)
+        progress.empty()
+
+
 if "api_url" not in st.session_state:
     st.session_state["api_url"] = get_default_api_url()
+
+if "market_analysis_result" not in st.session_state:
+    st.session_state["market_analysis_result"] = None
+
+if "analysis_history" not in st.session_state:
+    st.session_state["analysis_history"] = []
 
 with st.sidebar:
     st.header("⚙️ 配置")
@@ -45,8 +133,15 @@ with st.sidebar:
     st.session_state["api_url"] = (api_url or get_default_api_url()).rstrip("/")
     st.caption("优先使用侧边栏配置；未配置时读取环境变量 `JOB_MARKET_API_URL` 或 `API_BASE_URL`。")
 
-if "market_analysis_result" not in st.session_state:
-    st.session_state["market_analysis_result"] = None
+# 处理历史页触发的重跑
+pending_analysis = st.session_state.pop("pending_analysis", None)
+if pending_analysis:
+    st.info("已从历史记录载入参数，正在重新分析...")
+    _execute_analysis(
+        query=pending_analysis.get("query", "").strip(),
+        location=(pending_analysis.get("location") or "").strip() or None,
+        max_results=int(pending_analysis.get("max_results", 20)),
+    )
 
 # 分析表单
 col1, col2, col3 = st.columns([3, 2, 1])
@@ -61,24 +156,16 @@ if st.button("生成分析", type="primary"):
     if not analysis_query.strip():
         st.warning("请输入分析关键词后再生成。")
     else:
-        client = APIClient(st.session_state["api_url"])
-        with st.spinner("正在分析市场数据，请稍候..."):
-            try:
-                result = client.analyze_market(
-                    query=analysis_query.strip(),
-                    location=analysis_location.strip() or None,
-                    max_results=int(analysis_max_results),
-                )
-                st.session_state["market_analysis_result"] = result
-            except APIError as exc:
-                st.error(f"分析失败：{exc}")
-            except Exception as exc:
-                st.error(f"发生未知错误：{exc}")
+        _execute_analysis(
+            query=analysis_query.strip(),
+            location=analysis_location.strip() or None,
+            max_results=int(analysis_max_results),
+        )
 
 result = st.session_state.get("market_analysis_result")
 
 if not result:
-    st.info("输入关键词并点击“生成分析”后展示图表与市场洞察。")
+    _render_empty_state("暂无分析结果", "输入关键词并点击“生成分析”后展示图表与市场洞察。")
     st.stop()
 
 market_insights: Dict[str, Any] = result.get("market_insights", {})
