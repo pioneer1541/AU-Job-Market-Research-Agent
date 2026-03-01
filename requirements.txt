@@ -4,6 +4,7 @@ uvicorn[standard]>=0.27.0
 langgraph>=0.0.40
 langchain-core>=0.1.0
 langchain-openai>=0.0.5
+openai>=2.20.0
 httpx>=0.26.0
 thefuzz>=0.22.0
 python-Levenshtein>=0.23.0
