@@ -108,6 +108,22 @@
       page-break-inside: avoid;
     }
 
+    .chart-layout {
+      display: flex;
+      gap: 4mm;
+      align-items: flex-start;
+    }
+
+    .chart-image-wrap {
+      flex: 0 0 56%;
+      min-width: 0;
+    }
+
+    .chart-table-wrap {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
     .chart-title {
       font-size: 13pt;
       font-weight: 700;
@@ -122,6 +138,12 @@
       padding: 4px;
       background: #ffffff;
       margin-bottom: 2mm;
+    }
+
+    .empty-hint {
+      margin: 1mm 0 3mm 0;
+      color: #64748b;
+      font-size: 10pt;
     }
   </style>
 </head>
@@ -151,42 +173,74 @@
   <div class="charts">
     <div class="chart-block">
       <div class="chart-title">薪资范围分布</div>
-      {% if salary_chart_base64 %}
-      <img class="chart-image" src="data:image/png;base64,{{ salary_chart_base64 }}" alt="薪资范围分布饼图">
-      {% endif %}
-      <table>
-        <thead><tr><th>区间</th><th>数量</th></tr></thead>
-        <tbody>
-          {% for row in salary_chart_rows %}
-          <tr><td>{{ row.label }}</td><td>{{ row.value }}</td></tr>
-          {% endfor %}
-          {% if not salary_chart_rows %}
-          <tr><td colspan="2">暂无薪资分布数据</td></tr>
+      <div class="chart-layout">
+        <div class="chart-image-wrap">
+          {% if salary_chart_base64 %}
+          <img class="chart-image" src="data:image/png;base64,{{ salary_chart_base64 }}" alt="薪资范围分布饼图">
+          {% else %}
+          <p class="empty-hint">暂无可绘制的薪资饼图数据。</p>
           {% endif %}
-        </tbody>
-      </table>
+        </div>
+        <div class="chart-table-wrap">
+          <table>
+            <thead><tr><th>区间</th><th>数量</th></tr></thead>
+            <tbody>
+              {% for row in salary_chart_rows %}
+              <tr><td>{{ row.label }}</td><td>{{ row.value }}</td></tr>
+              {% endfor %}
+              {% if not salary_chart_rows %}
+              <tr><td colspan="2">暂无薪资分布数据</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
     <div class="chart-block">
       <div class="chart-title">技能要求 Top10 分布</div>
-      {% if skills_chart_base64 %}
-      <img class="chart-image" src="data:image/png;base64,{{ skills_chart_base64 }}" alt="技能要求 Top10 分布饼图">
-      {% endif %}
-      <table>
-        <thead><tr><th>技能</th><th>数量</th></tr></thead>
-        <tbody>
-          {% for row in skills_chart_rows %}
-          <tr><td>{{ row.label }}</td><td>{{ row.value }}</td></tr>
-          {% endfor %}
-          {% if not skills_chart_rows %}
-          <tr><td colspan="2">暂无技能分布数据</td></tr>
+      <div class="chart-layout">
+        <div class="chart-image-wrap">
+          {% if skills_chart_base64 %}
+          <img class="chart-image" src="data:image/png;base64,{{ skills_chart_base64 }}" alt="技能要求 Top10 分布饼图">
+          {% else %}
+          <p class="empty-hint">暂无可绘制的技能饼图数据。</p>
           {% endif %}
-        </tbody>
-      </table>
+        </div>
+        <div class="chart-table-wrap">
+          <table>
+            <thead><tr><th>技能</th><th>数量</th></tr></thead>
+            <tbody>
+              {% for row in skills_chart_rows %}
+              <tr><td>{{ row.label }}</td><td>{{ row.value }}</td></tr>
+              {% endfor %}
+              {% if not skills_chart_rows %}
+              <tr><td colspan="2">暂无技能分布数据</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 
+  <div class="table-title">需求侧信息</div>
+  <p>趋势判断：{{ trend_friendly_text }}</p>
+  {% if demand_series_rows %}
+  <table>
+    <thead><tr><th>日期</th><th>职位数</th></tr></thead>
+    <tbody>
+      {% for row in demand_series_rows %}
+      <tr><td>{{ row.date }}</td><td>{{ row.count }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-hint">暂无需求侧时间序列数据，可能是发布日期缺失或样本量不足。</p>
+  {% endif %}
+
   {% for section in sections %}
   <h2>{{ section.title }}</h2>
+    {% if section.blocks %}
     {% for block in section.blocks %}
       {% if block.type == "paragraph" %}
       <p>{{ block.text }}</p>
@@ -198,6 +252,11 @@
       </ul>
       {% endif %}
     {% endfor %}
+    {% elif "需求侧" in section.title %}
+    <p class="empty-hint">需求侧信息暂不可用，建议补充职位发布日期后重试。</p>
+    {% else %}
+    <p class="empty-hint">本节暂无可展示内容。</p>
+    {% endif %}
   {% endfor %}
   </div>
 </body>

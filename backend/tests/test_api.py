@@ -184,6 +184,9 @@ class TestAnalyzeEndpoint:
         assert "total_jobs" in insights
         assert "top_skills" in insights
         assert "top_companies" in insights
+        # 深度分析字段应始终存在，避免 PDF 报告 I 章节出现“暂无数据”。
+        assert "deep_analysis" in insights
+        assert isinstance(insights["deep_analysis"], dict)
     
     def test_analyze_market_max_results(self):
         """测试 max_results 参数"""

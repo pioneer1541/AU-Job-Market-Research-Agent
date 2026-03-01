@@ -175,6 +175,7 @@ def _convert_state_jobs_to_api_jobs(raw_jobs: list[dict], max_results: int) -> l
 def _build_market_insights_from_graph(jobs: list[JobListing], graph_result: dict) -> MarketInsights:
     """将 LangGraph 输出映射为 API 的 MarketInsights。"""
     market_insights = graph_result.get("market_insights", {}) or {}
+    analysis_results = graph_result.get("analysis_results", []) or []
     top_skills_raw = market_insights.get("top_skills", []) or []
     top_skills = [item.get("skill", "") for item in top_skills_raw if item.get("skill")]
 
@@ -197,6 +198,10 @@ def _build_market_insights_from_graph(jobs: list[JobListing], graph_result: dict
         jobs=[job.model_dump() for job in jobs],
         top_n=3,
     )
+    # 深度分析优先透传 graph 的 market_insights，缺失时回退到 analysis_results 聚合。
+    deep_analysis = market_insights.get("deep_analysis", {}) or {}
+    if not deep_analysis:
+        deep_analysis = StatisticsService().extract_deep_analysis(analysis_results)
 
     return MarketInsights(
         total_jobs=len(jobs),
@@ -211,6 +216,7 @@ def _build_market_insights_from_graph(jobs: list[JobListing], graph_result: dict
         applicant_analysis=market_insights.get("applicant_analysis", {}) or {},
         competition_intensity=market_insights.get("competition_intensity", {}) or {},
         skill_profile=market_insights.get("skill_profile", {}) or {},
+        deep_analysis=deep_analysis if isinstance(deep_analysis, dict) else {},
         employer_profile=market_insights.get("employer_profile", {}) or {},
         top_jobs=top_jobs if isinstance(top_jobs, dict) else {},
         report_meta=(graph_result.get("processed_data", {}) or {}).get("report_meta", {}) or {},

@@ -85,6 +85,7 @@ class MarketInsights(BaseModel):
     applicant_analysis: dict = Field(default_factory=dict, description="申请人数统计分析")
     competition_intensity: dict = Field(default_factory=dict, description="竞争强度统计")
     skill_profile: dict = Field(default_factory=dict, description="技能提取与画像")
+    deep_analysis: dict = Field(default_factory=dict, description="深度分析聚合结果")
     employer_profile: dict = Field(default_factory=dict, description="雇主分析画像")
     top_jobs: dict = Field(default_factory=dict, description="TOP 职位分析（申请人数/薪资）")
     report_meta: dict = Field(default_factory=dict, description="报告元信息")

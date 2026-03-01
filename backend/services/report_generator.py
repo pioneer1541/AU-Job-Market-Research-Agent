@@ -17,6 +17,8 @@ try:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+    from matplotlib.font_manager import FontProperties
     HAS_MATPLOTLIB = True
 except Exception:
     HAS_MATPLOTLIB = False
@@ -372,7 +374,7 @@ class ReportGenerator:
         top_employers = [str(item.get("company", "")).strip() for item in (employers.get("top_employers", []) or []) if isinstance(item, dict) and item.get("company")]
         total_jobs = int(sample.get("total_jobs") or market_insights.get("total_jobs") or 0)
         avg_applicants = float(applicant.get("avg_applicants_per_job") or 0)
-        trend_direction = str(trend.get("trend", "stable")).strip() or "stable"
+        trend_direction = self._friendly_trend_label(trend.get("trend", "stable"))
 
         prompt = self._build_career_advice_prompt(
             total_jobs=total_jobs,
@@ -437,15 +439,58 @@ class ReportGenerator:
         except (TypeError, ValueError):
             return 0.0
 
-    def _build_pie_chart_base64(self, title: str, labels: list[str], values: list[float]) -> str:
+    @staticmethod
+    def _friendly_trend_label(value: Any) -> str:
+        """将趋势值映射为更友好的中文文案。"""
+        if value is None:
+            return "趋势暂不明确"
+        text = str(value).strip()
+        if not text:
+            return "趋势暂不明确"
+
+        trend_mapping = {
+            "up": "上升",
+            "down": "下降",
+            "flat": "平稳",
+            "stable": "平稳",
+            "unknown": "趋势暂不明确",
+            "none": "趋势暂不明确",
+            "n/a": "趋势暂不明确",
+            "null": "趋势暂不明确",
+            "暂无数据": "趋势暂不明确",
+        }
+        return trend_mapping.get(text.lower(), text)
+
+    @staticmethod
+    def _detect_chinese_font() -> Optional[FontProperties]:
+        """检测可用中文字体，降低 Railway 容器内中文方框概率。"""
+        if not HAS_MATPLOTLIB:
+            return None
+
+        preferred_fonts = ["Noto Sans CJK SC", "SimHei", "Microsoft YaHei"]
+        available_font_names = {f.name for f in font_manager.fontManager.ttflist}
+        for font_name in preferred_fonts:
+            if font_name in available_font_names:
+                logger.info("检测到可用中文字体: %s", font_name)
+                return FontProperties(family=font_name)
+
+        logger.warning(
+            "未检测到指定中文字体（%s），将使用 matplotlib 默认字体。",
+            ", ".join(preferred_fonts),
+        )
+        return None
+
+    def _generate_pie_chart_base64(self, title: str, labels: list[str], values: list[float]) -> str:
         if not HAS_MATPLOTLIB or not labels or not values or sum(values) <= 0:
             return ""
 
-        # 配置中文字体回退，避免标题和标签出现乱码（方框）。
+        font_prop = self._detect_chinese_font()
+
+        # 配置字体回退链，兼容不同系统镜像。
         plt.rcParams["font.sans-serif"] = [
             "Noto Sans CJK SC",
-            "Microsoft YaHei",
             "SimHei",
+            "Microsoft YaHei",
             "PingFang SC",
             "WenQuanYi Zen Hei",
             "Arial Unicode MS",
@@ -468,22 +513,29 @@ class ReportGenerator:
         ]
 
         fig, ax = plt.subplots(figsize=(5.6, 4.2))
-        ax.pie(
+        _, texts, autotexts = ax.pie(
             values,
             labels=labels,
             autopct="%1.1f%%",
             startangle=135,
             colors=color_palette,
-            textprops={"fontsize": 9},
+            textprops={"fontsize": 9, "fontproperties": font_prop},
         )
+        if font_prop is not None:
+            for text_obj in [*texts, *autotexts]:
+                text_obj.set_fontproperties(font_prop)
         ax.axis("equal")
-        ax.set_title(title, fontsize=13, fontweight="bold")
+        ax.set_title(title, fontsize=13, fontweight="bold", fontproperties=font_prop)
         fig.tight_layout()
 
         chart_buffer = io.BytesIO()
         fig.savefig(chart_buffer, format="png", dpi=140, bbox_inches="tight")
         plt.close(fig)
         return base64.b64encode(chart_buffer.getvalue()).decode("utf-8")
+
+    def _build_pie_chart_base64(self, title: str, labels: list[str], values: list[float]) -> str:
+        """兼容旧方法名，统一转调新实现。"""
+        return self._generate_pie_chart_base64(title=title, labels=labels, values=values)
 
     @staticmethod
     def _extract_salary_band_data(market_insights: dict[str, Any]) -> tuple[list[str], list[float]]:
@@ -590,6 +642,7 @@ class ReportGenerator:
         generated_time = generated_at or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         sections = self._parse_report_sections(report_text)
         key_metrics = self._build_key_metrics_table(market_insights)
+        trend_analysis = market_insights.get("trend_analysis", {}) or {}
         salary_labels, salary_values = self._extract_salary_band_data(market_insights)
         skill_labels, skill_values = self._extract_top_skills_data(market_insights, limit=10)
 
@@ -605,6 +658,14 @@ class ReportGenerator:
         )
         salary_chart_rows = [{"label": label, "value": _fmt_int(value)} for label, value in zip(salary_labels, salary_values)]
         skills_chart_rows = [{"label": label, "value": _fmt_int(value)} for label, value in zip(skill_labels, skill_values)]
+        demand_series_rows = [
+            {
+                "date": str(item.get("date", "")).strip(),
+                "count": _fmt_int(self._coerce_number(item.get("count"))),
+            }
+            for item in (trend_analysis.get("series", []) or [])
+            if isinstance(item, dict) and str(item.get("date", "")).strip()
+        ]
 
         context = {
             "report_title": f"{query} 市场分析报告",
@@ -615,6 +676,8 @@ class ReportGenerator:
             "skills_chart_base64": skill_chart,
             "salary_chart_rows": salary_chart_rows,
             "skills_chart_rows": skills_chart_rows,
+            "trend_friendly_text": self._friendly_trend_label(trend_analysis.get("trend")),
+            "demand_series_rows": demand_series_rows,
         }
 
         if self._template_env:
