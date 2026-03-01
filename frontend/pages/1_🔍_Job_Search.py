@@ -126,7 +126,7 @@ with st.sidebar:
     st.header("⚙️ 配置")
     api_url = st.text_input("API 地址", value=st.session_state["api_url"], key="job_search_api_url")
     st.session_state["api_url"] = (api_url or get_default_api_url()).rstrip("/")
-    st.caption("优先使用侧边栏配置；未配置时读取环境变量 `JOB_MARKET_API_URL` 或 `API_BASE_URL`。")
+    st.caption("优先使用侧边栏配置；未配置时读取环境变量 `BACKEND_URL`、`JOB_MARKET_API_URL` 或 `API_BASE_URL`。")
 
 # 处理历史页触发的重跑
 pending_search = st.session_state.pop("pending_search", None)

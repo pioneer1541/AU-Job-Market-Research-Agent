@@ -14,7 +14,8 @@ class APIError(Exception):
 def get_default_api_url() -> str:
     """从环境变量读取 API 地址，未配置时使用本地默认地址。"""
     return (
-        os.getenv("JOB_MARKET_API_URL")
+        os.getenv("BACKEND_URL")
+        or os.getenv("JOB_MARKET_API_URL")
         or os.getenv("API_BASE_URL")
         or DEFAULT_API_URL
     ).rstrip("/")

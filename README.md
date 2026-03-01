@@ -106,26 +106,41 @@ docker compose up -d --build
 docker compose logs -f backend
 ```
 
-### Railway 部署
+### Railway 部署（前后端分离）
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/pioneer1541/AU-Job-Market-Research-Agent)
 
-1. 在 Railway 创建项目并连接本仓库（或使用上方一键部署按钮）。
-2. 在 Railway 项目 `Variables` 中配置环境变量（可参考 `.env.production.example`）：
-   - `LLM_API_KEY`
-   - `LLM_BASE_URL`
-   - `APIFY_API_TOKEN`
-   - 可选：`APP_ENV=production`、`LOG_LEVEL=INFO`
-3. Railway 会自动读取仓库根目录的 `railway.toml`（`railway.json` 也已提供）。
-4. 部署后可通过以下路径验证服务：
-   - 健康检查：`/api/health`
-   - 文档页面：`/docs`
+本项目在 Railway 上建议拆分为两个 Service，分别部署后端与前端：
 
-Railway 运行时会自动注入 `PORT` 环境变量，启动命令已配置为：
+1. 后端 Service（根目录部署）
+   - 使用仓库根目录 `railway.toml`
+   - 在 Railway `Variables` 中配置：
+     - `LLM_API_KEY`
+     - `LLM_BASE_URL`
+     - `APIFY_API_TOKEN`
+     - 可选：`APP_ENV=production`、`LOG_LEVEL=INFO`
+   - 部署成功后验证：
+     - 健康检查：`/api/health`
+     - 文档页面：`/docs`
+
+2. 前端 Service（`frontend/` 目录部署）
+   - Root Directory 设置为 `frontend`
+   - 使用 `frontend/railway.toml`（Nixpacks 构建）
+   - 启动命令：
 
 ```bash
-sh -c 'uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}'
+sh -c 'streamlit run app.py --server.port ${PORT:-8501} --server.address 0.0.0.0'
 ```
+
+3. 前端变量配置
+   - 在前端 Service 的 `Variables` 中设置：
+     - `BACKEND_URL=https://web-production-35c6c.up.railway.app`
+   - 前端会按优先级读取 API 地址：
+     - `BACKEND_URL`
+     - `JOB_MARKET_API_URL`
+     - `API_BASE_URL`
+
+说明：Railway 会自动注入 `PORT`，前端默认端口为 `8501`，未注入时会回退到 `8501`。
 
 ### 生产部署建议
 
