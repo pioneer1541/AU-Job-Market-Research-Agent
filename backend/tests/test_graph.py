@@ -139,3 +139,47 @@ class TestNodeExecution:
         result = report_generator_node(state)
         assert "report" in result
         assert "Job Market Research Report" in result["report"]
+
+    def test_data_processor_node_filters_low_salary_jobs(self):
+        """Test data processor applies low salary filter"""
+        from agents.nodes import data_processor_node
+
+        state: GraphState = {
+            "query": "test query",
+            "job_listings": [
+                {
+                    "id": "job-1",
+                    "title": "Junior Dev",
+                    "company": "A",
+                    "location": "Sydney",
+                    "salary": "AUD 20/hour",
+                    "description": "",
+                    "url": "",
+                    "source": "seek",
+                    "posted_date": "2026-02-20",
+                },
+                {
+                    "id": "job-2",
+                    "title": "Engineer",
+                    "company": "B",
+                    "location": "Melbourne",
+                    "salary": "AUD 80000",
+                    "description": "",
+                    "url": "",
+                    "source": "seek",
+                    "posted_date": "2026-02-20",
+                },
+            ],
+            "analysis_results": [],
+            "errors": []
+        }
+
+        result = data_processor_node(state)
+        processed = result["processed_data"]
+        stats = processed["salary_filter_stats"]
+
+        assert result["next_action"] == "analyze"
+        assert stats["total_jobs_before_filter"] == 2
+        assert stats["total_jobs_after_filter"] == 1
+        assert stats["filtered_low_salary_jobs"] == 1
+        assert processed["total_jobs"] == 1

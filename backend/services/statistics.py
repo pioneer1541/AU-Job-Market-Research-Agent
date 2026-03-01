@@ -103,7 +103,8 @@ def parse_salary_text(salary_text: Optional[str]) -> Optional[dict[str, Any]]:
         values.append(float(match) * 1000)
     for match in re.findall(r"(\d{2,7}(?:\.\d+)?)", s):
         num = float(match)
-        if num < 30 and "k" not in s:
+        # 对年薪文本保留原有噪音过滤；时薪场景允许解析小于 30 的合法数值。
+        if num < 30 and "k" not in s and period != "hour":
             continue
         if num <= 1000 and period == "hour":
             values.append(num)
@@ -137,6 +138,54 @@ def parse_salary_text(salary_text: Optional[str]) -> Optional[dict[str, Any]]:
 
 class StatisticsService:
     """职位市场统计计算服务。"""
+
+    def filter_low_salary_jobs(self, jobs: list[dict[str, Any]]) -> dict[str, Any]:
+        """
+        过滤低薪职位：
+        - 时薪（AUD）低于 24
+        - 年薪（AUD）低于 50,000
+        """
+        total_jobs = len(jobs)
+        filtered_jobs: list[dict[str, Any]] = []
+        filtered_out_jobs = 0
+        evaluated_salary_jobs = 0
+
+        for job in jobs:
+            parsed_salary = parse_salary_text(job.get("salary"))
+            if not parsed_salary:
+                filtered_jobs.append(job)
+                continue
+
+            # 仅对 AUD 薪资做阈值过滤，避免跨币种误判。
+            if parsed_salary.get("currency") != "AUD":
+                filtered_jobs.append(job)
+                continue
+
+            evaluated_salary_jobs += 1
+            period = parsed_salary.get("period")
+            max_annual = parsed_salary.get("max_annual", 0.0)
+            max_hourly = max_annual / (40 * 52)
+            is_hourly_low = period == "hour" and max_hourly < 24
+            is_annual_low = period != "hour" and max_annual < 50000
+
+            if is_hourly_low or is_annual_low:
+                filtered_out_jobs += 1
+                continue
+
+            filtered_jobs.append(job)
+
+        return {
+            "filtered_jobs": filtered_jobs,
+            "filter_stats": {
+                "total_jobs_before_filter": total_jobs,
+                "total_jobs_after_filter": len(filtered_jobs),
+                "filtered_low_salary_jobs": filtered_out_jobs,
+                "filtered_ratio_pct": round(_safe_div(filtered_out_jobs, max(total_jobs, 1)) * 100, 2),
+                "evaluated_salary_jobs": evaluated_salary_jobs,
+                "hourly_threshold_aud": 24,
+                "annual_threshold_aud": 50000,
+            },
+        }
 
     def compute_sample_overview(
         self,

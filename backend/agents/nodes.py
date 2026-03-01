@@ -2,8 +2,7 @@
 LangGraph Node Definitions
 """
 import logging
-import asyncio
-from typing import Literal, Optional
+from typing import Literal
 
 try:
     from .state import GraphState, JobListing as StateJobListing, AnalysisResult
@@ -121,10 +120,17 @@ def data_processor_node(state: GraphState) -> dict:
     Data processor node: Cleans, deduplicates, and normalizes job data.
     """
     jobs = state.get("job_listings", [])
-    
-    sample_overview = statistics_service.compute_sample_overview(jobs, [])
+
+    # 在数据处理阶段先过滤低薪岗位，再进入后续分析流程。
+    filter_result = statistics_service.filter_low_salary_jobs(jobs)
+    filtered_jobs = filter_result.get("filtered_jobs", [])
+    salary_filter_stats = filter_result.get("filter_stats", {})
+
+    sample_overview = statistics_service.compute_sample_overview(filtered_jobs, [])
     processed_data = {
         **sample_overview,
+        "salary_filter_stats": salary_filter_stats,
+        "filtered_job_listings": filtered_jobs,
         "pipeline_stage": "process_data",
     }
     
@@ -141,7 +147,7 @@ async def market_analyzer_node(state: GraphState) -> dict:
     使用 LLM 分析职位描述，提取技能、经验级别等信息。
     """
     processed_data = state.get("processed_data", {})
-    jobs = state.get("job_listings", [])
+    jobs = processed_data.get("filtered_job_listings") or state.get("job_listings", [])
     errors = state.get("errors", [])
     
     analysis_results: list[AnalysisResult] = []

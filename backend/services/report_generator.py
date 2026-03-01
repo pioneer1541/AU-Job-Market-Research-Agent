@@ -32,6 +32,7 @@ class ReportGenerator:
         competition = market_insights.get("competition_intensity", {}) or {}
         skills = market_insights.get("skill_profile", {}) or {}
         employers = market_insights.get("employer_profile", {}) or {}
+        salary_filter_stats = processed_data.get("salary_filter_stats", {}) or {}
 
         generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
@@ -44,6 +45,17 @@ class ReportGenerator:
             f"- 错误数: {len(errors)}\n"
         )
 
+        filter_lines = ""
+        if salary_filter_stats:
+            # 在报告中展示低薪过滤统计，明确过滤前后样本变化。
+            filter_lines = (
+                f"- 低薪过滤前职位数: {_fmt_int(salary_filter_stats.get('total_jobs_before_filter'))}\n"
+                f"- 低薪过滤后职位数: {_fmt_int(salary_filter_stats.get('total_jobs_after_filter'))}\n"
+                f"- 过滤职位数: {_fmt_int(salary_filter_stats.get('filtered_low_salary_jobs'))}\n"
+                f"- 过滤占比: {salary_filter_stats.get('filtered_ratio_pct', 0)}%\n"
+                f"- 过滤阈值: 时薪 < {salary_filter_stats.get('hourly_threshold_aud', 24)} AUD 或年薪 < {salary_filter_stats.get('annual_threshold_aud', 50000)} AUD\n"
+            )
+
         sections["B"] = (
             "## B. 样本概览\n"
             f"- 样本职位数: {_fmt_int(sample.get('total_jobs'))}\n"
@@ -52,6 +64,7 @@ class ReportGenerator:
             f"- 薪资覆盖率: {sample.get('salary_coverage_pct', 0)}%\n"
             f"- 分析覆盖率: {sample.get('analysis_coverage_pct', 0)}%\n"
             f"- 日期范围: {sample.get('date_range', {}).get('start', 'N/A')} ~ {sample.get('date_range', {}).get('end', 'N/A')}\n"
+            f"{filter_lines}"
         )
 
         trend_items = trend.get("series", [])[:10]

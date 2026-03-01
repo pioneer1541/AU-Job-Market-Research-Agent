@@ -1,6 +1,7 @@
 """StatisticsService 单元测试。"""
 
 from backend.services.statistics import StatisticsService, parse_salary_text
+from backend.services.report_generator import ReportGenerator
 
 
 def _build_jobs() -> list[dict]:
@@ -137,3 +138,69 @@ class TestStatisticsService:
         assert "top_skills" in insights
         assert "salary_stats" in insights
         assert isinstance(insights["skill_profile"].get("top_skills", []), list)
+
+    def test_filter_low_salary_jobs(self):
+        service = StatisticsService()
+        jobs = [
+            {"id": "low-hourly", "salary": "AUD 22/hour"},
+            {"id": "low-annual", "salary": "AUD 48000"},
+            {"id": "ok-hourly", "salary": "AUD 24/hour"},
+            {"id": "ok-annual", "salary": "AUD 60000"},
+            {"id": "unknown", "salary": None},
+        ]
+
+        result = service.filter_low_salary_jobs(jobs)
+        filtered_jobs = result["filtered_jobs"]
+        stats = result["filter_stats"]
+
+        filtered_ids = {job["id"] for job in filtered_jobs}
+        assert "low-hourly" not in filtered_ids
+        assert "low-annual" not in filtered_ids
+        assert "ok-hourly" in filtered_ids
+        assert "ok-annual" in filtered_ids
+        assert "unknown" in filtered_ids
+        assert stats["total_jobs_before_filter"] == 5
+        assert stats["total_jobs_after_filter"] == 3
+        assert stats["filtered_low_salary_jobs"] == 2
+        assert stats["hourly_threshold_aud"] == 24
+        assert stats["annual_threshold_aud"] == 50000
+
+
+class TestReportGenerator:
+    """报告生成测试。"""
+
+    def test_generate_report_contains_salary_filter_stats(self):
+        generator = ReportGenerator()
+        market_insights = {
+            "sample_overview": {
+                "total_jobs": 3,
+                "unique_companies": 2,
+                "unique_locations": 2,
+                "salary_coverage_pct": 66.67,
+                "analysis_coverage_pct": 100.0,
+                "date_range": {"start": "2026-02-20", "end": "2026-02-22"},
+            }
+        }
+        processed_data = {
+            "salary_filter_stats": {
+                "total_jobs_before_filter": 5,
+                "total_jobs_after_filter": 3,
+                "filtered_low_salary_jobs": 2,
+                "filtered_ratio_pct": 40.0,
+                "hourly_threshold_aud": 24,
+                "annual_threshold_aud": 50000,
+            }
+        }
+
+        generated = generator.generate(
+            query="python developer",
+            market_insights=market_insights,
+            processed_data=processed_data,
+            errors=[],
+        )
+        report = generated["report"]
+
+        assert "低薪过滤前职位数: 5" in report
+        assert "低薪过滤后职位数: 3" in report
+        assert "过滤职位数: 2" in report
+        assert "时薪 < 24 AUD 或年薪 < 50000 AUD" in report
