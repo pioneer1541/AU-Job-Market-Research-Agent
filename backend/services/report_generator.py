@@ -206,12 +206,39 @@ class ReportGenerator:
         if not HAS_MATPLOTLIB or not labels or not values or sum(values) <= 0:
             return ""
 
+        # 配置中文字体回退，避免标题和标签出现乱码（方框）。
+        plt.rcParams["font.sans-serif"] = [
+            "Noto Sans CJK SC",
+            "Microsoft YaHei",
+            "SimHei",
+            "PingFang SC",
+            "WenQuanYi Zen Hei",
+            "Arial Unicode MS",
+            "DejaVu Sans",
+        ]
+        plt.rcParams["axes.unicode_minus"] = False
+
+        # 使用更高区分度的饼图配色，提升可读性。
+        color_palette = [
+            "#4E79A7",
+            "#F28E2B",
+            "#E15759",
+            "#76B7B2",
+            "#59A14F",
+            "#EDC948",
+            "#B07AA1",
+            "#FF9DA7",
+            "#9C755F",
+            "#BAB0AC",
+        ]
+
         fig, ax = plt.subplots(figsize=(5.6, 4.2))
         ax.pie(
             values,
             labels=labels,
             autopct="%1.1f%%",
             startangle=135,
+            colors=color_palette,
             textprops={"fontsize": 9},
         )
         ax.axis("equal")
