@@ -135,10 +135,13 @@ sh -c 'streamlit run app.py --server.port ${PORT:-8501} --server.address 0.0.0.0
 3. 前端变量配置
    - 在前端 Service 的 `Variables` 中设置：
      - `BACKEND_URL=https://web-production-35c6c.up.railway.app`
+     - 可选：`FRONTEND_API_TIMEOUT=300`（单位秒，默认 300，适配 3-5 分钟分析耗时）
    - 前端会按优先级读取 API 地址：
      - `BACKEND_URL`
      - `JOB_MARKET_API_URL`
      - `API_BASE_URL`
+   - 前端 API 超时读取：
+     - `FRONTEND_API_TIMEOUT`（默认 `300` 秒）
 
 说明：Railway 会自动注入 `PORT`，前端默认端口为 `8501`，未注入时会回退到 `8501`。
 

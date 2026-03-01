@@ -5,6 +5,7 @@ import httpx
 
 
 DEFAULT_API_URL = "http://localhost:8000"
+DEFAULT_API_TIMEOUT_SECONDS = 300.0
 
 
 class APIError(Exception):
@@ -21,10 +22,20 @@ def get_default_api_url() -> str:
     ).rstrip("/")
 
 
+def get_default_timeout() -> float:
+    """读取前端 API 超时配置，默认 300 秒。"""
+    raw_timeout = os.getenv("FRONTEND_API_TIMEOUT", str(DEFAULT_API_TIMEOUT_SECONDS))
+    try:
+        timeout = float(raw_timeout)
+    except ValueError:
+        return DEFAULT_API_TIMEOUT_SECONDS
+    return timeout if timeout > 0 else DEFAULT_API_TIMEOUT_SECONDS
+
+
 class APIClient:
-    def __init__(self, base_url: Optional[str] = None, timeout: float = 20.0):
+    def __init__(self, base_url: Optional[str] = None, timeout: Optional[float] = None):
         self.base_url = (base_url or get_default_api_url()).rstrip("/")
-        self.timeout = timeout
+        self.timeout = timeout if timeout is not None else get_default_timeout()
 
     def _request(self, method: str, path: str, **kwargs) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
