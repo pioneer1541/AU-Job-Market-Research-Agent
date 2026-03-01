@@ -66,6 +66,24 @@ def build_skill_counts(skills: List[str]) -> Dict[str, int]:
     return dict(Counter(skills))
 
 
+def format_salary_range_from_analysis(salary_analysis: Dict[str, Any]) -> str:
+    """优先使用后端结构化薪资分析字段。"""
+    annual = salary_analysis.get("annual", {}) if isinstance(salary_analysis, dict) else {}
+    if not isinstance(annual, dict):
+        return "暂无数据"
+
+    min_val = annual.get("min")
+    max_val = annual.get("max")
+    if min_val is None or max_val is None:
+        return "暂无数据"
+
+    currency = salary_analysis.get("currency") or "AUD"
+    try:
+        return f"{currency} {int(min_val):,} - {int(max_val):,}"
+    except (TypeError, ValueError):
+        return "暂无数据"
+
+
 def format_meta_time(meta: Dict[str, Any]) -> str:
     generated = str(meta.get("generated_at", "")).strip()
     if not generated:
@@ -202,14 +220,37 @@ jobs: List[Dict[str, Any]] = result.get("jobs", []) or []
 report: str = str(result.get("report", "") or "")
 meta: Dict[str, Any] = result.get("meta", {}) or {}
 
-jobs_for_chart = normalize_jobs_for_chart(jobs)
-skills_list: List[str] = market_insights.get("top_skills", []) or []
-skills_data = build_skill_counts(skills_list)
-location_distribution: Dict[str, int] = market_insights.get("location_distribution", {}) or {}
-company_list: List[str] = market_insights.get("top_companies", []) or []
+sample_overview: Dict[str, Any] = market_insights.get("sample_overview", {}) or {}
+trend_analysis: Dict[str, Any] = market_insights.get("trend_analysis", {}) or {}
+salary_analysis: Dict[str, Any] = market_insights.get("salary_analysis", {}) or {}
+competition_intensity: Dict[str, Any] = market_insights.get("competition_intensity", {}) or {}
+skill_profile: Dict[str, Any] = market_insights.get("skill_profile", {}) or {}
+employer_profile: Dict[str, Any] = market_insights.get("employer_profile", {}) or {}
 
-salary_range_text = market_insights.get("avg_salary_range") or "暂无数据"
-total_jobs = int(market_insights.get("total_jobs") or len(jobs))
+jobs_for_chart = normalize_jobs_for_chart(jobs)
+skills_from_profile = skill_profile.get("top_skills", []) if isinstance(skill_profile, dict) else []
+if skills_from_profile and isinstance(skills_from_profile, list) and isinstance(skills_from_profile[0], dict):
+    skills_list = [str(item.get("skill", "")).strip() for item in skills_from_profile if item.get("skill")]
+else:
+    skills_list = market_insights.get("top_skills", []) or []
+skills_list = [skill for skill in skills_list if skill]
+
+skills_data = build_skill_counts(skills_list)
+location_distribution: Dict[str, int] = (
+    market_insights.get("location_distribution")
+    or sample_overview.get("location_distribution")
+    or {}
+)
+company_list: List[str] = market_insights.get("top_companies", []) or []
+if not company_list and isinstance(employer_profile, dict):
+    company_list = [
+        str(item.get("company", "")).strip()
+        for item in employer_profile.get("top_employers", []) or []
+        if isinstance(item, dict) and item.get("company")
+    ]
+
+salary_range_text = market_insights.get("avg_salary_range") or format_salary_range_from_analysis(salary_analysis)
+total_jobs = int(sample_overview.get("total_jobs") or market_insights.get("total_jobs") or len(jobs))
 company_count = len(set(company_list)) if company_list else len(set(job.get("company") for job in jobs if job.get("company")))
 
 # A. 报告元信息卡片
@@ -237,7 +278,10 @@ with c4:
 render_section_title("C. 需求侧分析", "观察职位发布时间趋势与岗位类型结构")
 d1, d2 = st.columns(2)
 with d1:
-    st.plotly_chart(create_job_trend_chart(jobs_for_chart, chart_type="line"), use_container_width=True)
+    st.plotly_chart(
+        create_job_trend_chart(jobs_for_chart, chart_type="line", trend_analysis=trend_analysis),
+        use_container_width=True,
+    )
 with d2:
     st.plotly_chart(create_job_type_distribution_chart(jobs_for_chart), use_container_width=True)
 with st.expander("查看需求侧解读", expanded=False):
@@ -249,7 +293,10 @@ with st.expander("查看需求侧解读", expanded=False):
 
 # D. 薪资分析
 render_section_title("D. 薪资分析", "通过直方图和箱线边际识别薪资密集区间")
-st.plotly_chart(create_salary_distribution_chart(jobs_for_chart, show_box=True), use_container_width=True)
+st.plotly_chart(
+    create_salary_distribution_chart(jobs_for_chart, show_box=True, salary_analysis=salary_analysis),
+    use_container_width=True,
+)
 with st.expander("查看薪资分析说明", expanded=False):
     st.markdown(
         "- 直方图反映样本薪资在各区间的密度。\n"
@@ -260,7 +307,11 @@ with st.expander("查看薪资分析说明", expanded=False):
 # E. 竞争强度
 render_section_title("E. 竞争强度", "从地区职位集中度判断竞争热点")
 st.plotly_chart(
-    create_location_hotspot_chart(jobs=jobs_for_chart, location_distribution=location_distribution),
+    create_location_hotspot_chart(
+        jobs=jobs_for_chart,
+        location_distribution=location_distribution,
+        competition_intensity=competition_intensity,
+    ),
     use_container_width=True,
 )
 with st.expander("查看竞争强度解读", expanded=False):
@@ -274,7 +325,10 @@ with st.expander("查看竞争强度解读", expanded=False):
 # F. 技能画像
 render_section_title("F. 技能画像", "结合词频识别技能栈优先级")
 skill_chart_type = st.radio("技能图表样式", options=["bar", "wordcloud"], horizontal=True, label_visibility="collapsed")
-st.plotly_chart(create_skill_chart(skills_data, chart_type=skill_chart_type), use_container_width=True)
+st.plotly_chart(
+    create_skill_chart(skills_data, chart_type=skill_chart_type, skill_profile=skill_profile),
+    use_container_width=True,
+)
 with st.expander("查看技能画像解读", expanded=False):
     if skills_list:
         top_text = "、".join(skills_list[:5])
@@ -284,7 +338,14 @@ with st.expander("查看技能画像解读", expanded=False):
 
 # G. 雇主画像
 render_section_title("G. 雇主画像", "识别持续招聘的关键雇主")
-st.plotly_chart(create_top_employers_chart(jobs=jobs_for_chart, top_companies=company_list), use_container_width=True)
+st.plotly_chart(
+    create_top_employers_chart(
+        jobs=jobs_for_chart,
+        top_companies=company_list,
+        employer_profile=employer_profile,
+    ),
+    use_container_width=True,
+)
 with st.expander("查看雇主画像解读", expanded=False):
     if company_list:
         st.markdown(f"- 高频雇主包括：**{'、'.join(company_list[:5])}**。")

@@ -80,6 +80,11 @@ def _normalize_skills(raw_skills: Any) -> list[str]:
     return []
 
 
+def _extract_module_dict(market_insights: Dict[str, Any], key: str) -> Dict[str, Any]:
+    value = market_insights.get(key, {})
+    return value if isinstance(value, dict) else {}
+
+
 def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     data: Dict[str, Any] = payload
     if isinstance(payload.get("data"), dict):
@@ -94,10 +99,18 @@ def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     raw_market_insights = _pick_first(data, ["market_insights", "insights", "summary"], {}) or {}
     market_insights = raw_market_insights if isinstance(raw_market_insights, dict) else {}
+    sample_overview = _extract_module_dict(market_insights, "sample_overview")
+    trend_analysis = _extract_module_dict(market_insights, "trend_analysis")
+    salary_analysis = _extract_module_dict(market_insights, "salary_analysis")
+    competition_intensity = _extract_module_dict(market_insights, "competition_intensity")
+    skill_profile = _extract_module_dict(market_insights, "skill_profile")
+    employer_profile = _extract_module_dict(market_insights, "employer_profile")
 
     top_skills = _normalize_skills(
         _pick_first(market_insights, ["top_skills", "skills", "topSkills"], [])
     )
+    if not top_skills:
+        top_skills = _normalize_skills(skill_profile.get("top_skills", []))
 
     top_companies_raw = _pick_first(
         market_insights,
@@ -111,6 +124,12 @@ def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             top_companies = [str(item).strip() for item in top_companies_raw if str(item).strip()]
     else:
         top_companies = []
+    if not top_companies:
+        top_companies = [
+            str(item.get("company", "")).strip()
+            for item in employer_profile.get("top_employers", []) or []
+            if isinstance(item, dict) and item.get("company")
+        ]
 
     location_distribution = _to_count_dict(
         _pick_first(
@@ -149,7 +168,11 @@ def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         top_companies = [name for name, _ in company_counts.most_common(10)]
 
     normalized_insights: Dict[str, Any] = {
-        "total_jobs": _pick_first(market_insights, ["total_jobs", "total", "job_count"], len(jobs)),
+        "total_jobs": _pick_first(
+            market_insights,
+            ["total_jobs", "total", "job_count"],
+            sample_overview.get("total_jobs", len(jobs)),
+        ),
         "avg_salary_range": _pick_first(market_insights, ["avg_salary_range", "average_salary", "salary_range"]),
         "top_skills": top_skills,
         "top_companies": top_companies,
@@ -158,6 +181,14 @@ def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "salary_distribution": salary_distribution,
         "job_type_distribution": job_type_distribution,
         "competition_level": _pick_first(market_insights, ["competition_level", "competition", "market_heat"]),
+        "sample_overview": sample_overview,
+        "trend_analysis": trend_analysis,
+        "salary_analysis": salary_analysis,
+        "competition_intensity": competition_intensity,
+        "skill_profile": skill_profile,
+        "employer_profile": employer_profile,
+        "report_meta": _extract_module_dict(market_insights, "report_meta"),
+        "report_sections": market_insights.get("report_sections", {}) if isinstance(market_insights.get("report_sections"), dict) else {},
     }
 
     report = _pick_first(data, ["report", "analysis_report", "markdown_report"], "") or ""

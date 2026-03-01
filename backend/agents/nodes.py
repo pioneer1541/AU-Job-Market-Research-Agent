@@ -156,8 +156,9 @@ async def market_analyzer_node(state: GraphState) -> dict:
             logger.exception(error_msg)
             errors.append(error_msg)
     
-    # 聚合统计分析（需求趋势/薪资/竞争强度/技能/雇主）
-    market_insights = statistics_service.generate_market_insights(jobs, analysis_results)
+    # 聚合统计分析（需求趋势/薪资/竞争强度/技能/雇主）。
+    # 这里使用 StatisticsService 统一生成模块化市场洞察结构。
+    market_insights = StatisticsService().generate_market_insights(jobs, analysis_results)
     
     return {
         "analysis_results": analysis_results,
