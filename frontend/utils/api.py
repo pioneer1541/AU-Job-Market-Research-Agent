@@ -1,5 +1,7 @@
 import os
-from typing import Optional, Dict, Any
+from collections import Counter
+from datetime import datetime
+from typing import Optional, Dict, Any, Iterable
 
 import httpx
 
@@ -30,6 +32,148 @@ def get_default_timeout() -> float:
     except ValueError:
         return DEFAULT_API_TIMEOUT_SECONDS
     return timeout if timeout > 0 else DEFAULT_API_TIMEOUT_SECONDS
+
+
+def _pick_first(mapping: Dict[str, Any], keys: Iterable[str], default: Any = None) -> Any:
+    for key in keys:
+        if key in mapping and mapping.get(key) is not None:
+            return mapping.get(key)
+    return default
+
+
+def _to_count_dict(raw: Any) -> Dict[str, int]:
+    if isinstance(raw, dict):
+        out: Dict[str, int] = {}
+        for key, value in raw.items():
+            try:
+                out[str(key)] = int(value)
+            except (ValueError, TypeError):
+                continue
+        return out
+
+    if isinstance(raw, list):
+        out: Dict[str, int] = {}
+        for item in raw:
+            if isinstance(item, dict):
+                label = _pick_first(item, ["name", "label", "key", "location", "skill", "company", "type"])
+                count = _pick_first(item, ["count", "value", "jobs", "total"], 0)
+                if not label:
+                    continue
+                try:
+                    out[str(label)] = int(count)
+                except (ValueError, TypeError):
+                    continue
+            elif item:
+                out[str(item)] = out.get(str(item), 0) + 1
+        return out
+
+    return {}
+
+
+def _normalize_skills(raw_skills: Any) -> list[str]:
+    if isinstance(raw_skills, list):
+        if raw_skills and isinstance(raw_skills[0], dict):
+            return [str(item.get("skill", "")).strip() for item in raw_skills if item.get("skill")]
+        return [str(skill).strip() for skill in raw_skills if str(skill).strip()]
+    if isinstance(raw_skills, str) and raw_skills.strip():
+        return [raw_skills.strip()]
+    return []
+
+
+def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    data: Dict[str, Any] = payload
+    if isinstance(payload.get("data"), dict):
+        data = payload["data"]
+    elif isinstance(payload.get("result"), dict):
+        data = payload["result"]
+    elif isinstance(payload.get("analysis"), dict):
+        data = payload["analysis"]
+
+    raw_jobs = _pick_first(data, ["jobs", "job_listings", "samples"], []) or []
+    jobs = raw_jobs if isinstance(raw_jobs, list) else []
+
+    raw_market_insights = _pick_first(data, ["market_insights", "insights", "summary"], {}) or {}
+    market_insights = raw_market_insights if isinstance(raw_market_insights, dict) else {}
+
+    top_skills = _normalize_skills(
+        _pick_first(market_insights, ["top_skills", "skills", "topSkills"], [])
+    )
+
+    top_companies_raw = _pick_first(
+        market_insights,
+        ["top_companies", "top_employers", "companies", "topCompanies"],
+        [],
+    )
+    if isinstance(top_companies_raw, list):
+        if top_companies_raw and isinstance(top_companies_raw[0], dict):
+            top_companies = [str(item.get("company", "")).strip() for item in top_companies_raw if item.get("company")]
+        else:
+            top_companies = [str(item).strip() for item in top_companies_raw if str(item).strip()]
+    else:
+        top_companies = []
+
+    location_distribution = _to_count_dict(
+        _pick_first(
+            market_insights,
+            ["location_distribution", "top_locations", "locations", "locationDistribution"],
+            {},
+        )
+    )
+
+    experience_distribution = _to_count_dict(
+        _pick_first(
+            market_insights,
+            ["experience_distribution", "experience_levels", "experienceDistribution"],
+            {},
+        )
+    )
+
+    salary_distribution = _to_count_dict(
+        _pick_first(
+            market_insights,
+            ["salary_distribution", "salary_bands", "salaryDistribution"],
+            {},
+        )
+    )
+
+    job_type_distribution = _to_count_dict(
+        _pick_first(
+            market_insights,
+            ["job_type_distribution", "employment_type_distribution", "jobTypeDistribution"],
+            {},
+        )
+    )
+
+    if not top_companies and jobs:
+        company_counts = Counter(str(job.get("company", "")).strip() for job in jobs if job.get("company"))
+        top_companies = [name for name, _ in company_counts.most_common(10)]
+
+    normalized_insights: Dict[str, Any] = {
+        "total_jobs": _pick_first(market_insights, ["total_jobs", "total", "job_count"], len(jobs)),
+        "avg_salary_range": _pick_first(market_insights, ["avg_salary_range", "average_salary", "salary_range"]),
+        "top_skills": top_skills,
+        "top_companies": top_companies,
+        "experience_distribution": experience_distribution,
+        "location_distribution": location_distribution,
+        "salary_distribution": salary_distribution,
+        "job_type_distribution": job_type_distribution,
+        "competition_level": _pick_first(market_insights, ["competition_level", "competition", "market_heat"]),
+    }
+
+    report = _pick_first(data, ["report", "analysis_report", "markdown_report"], "") or ""
+
+    meta = _pick_first(data, ["meta", "metadata"], {})
+    if not isinstance(meta, dict):
+        meta = {}
+
+    meta.setdefault("generated_at", datetime.now().isoformat(timespec="seconds"))
+
+    return {
+        "market_insights": normalized_insights,
+        "jobs": jobs,
+        "report": str(report),
+        "meta": meta,
+    }
 
 
 class APIClient:
@@ -83,11 +227,13 @@ class APIClient:
         location: Optional[str] = None,
         max_results: int = 20,
     ) -> Dict[str, Any]:
-        """调用市场分析接口。"""
+        """调用市场分析接口并标准化响应结构。"""
         params: Dict[str, Any] = {"query": query, "max_results": max_results}
         if location:
             params["location"] = location
-        return self._request("GET", "/api/analyze", params=params)
+
+        payload = self._request("GET", "/api/analyze", params=params)
+        return _normalize_analyze_payload(payload)
 
     def health_check(self) -> Dict[str, Any]:
         """调用健康检查接口。"""
