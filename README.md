@@ -2,6 +2,8 @@
 
 一个基于 AI Agent 的职位市场研究工具，用于自动抓取职位信息、解析 JD 内容并生成可视化分析结果，帮助你快速理解技能需求、薪资分布与市场趋势。
 
+仓库地址：<https://github.com/pioneer1541/AU-Job-Market-Research-Agent.git>
+
 ## 功能概览
 
 - 自动职位采集：通过 Apify Seek Scraper 抓取职位数据
