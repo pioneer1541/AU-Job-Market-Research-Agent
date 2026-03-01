@@ -18,7 +18,7 @@ def render_job_card(job: Dict[str, Any], index: int = 0):
             st.markdown(f"📍 {location} | 📋 {job_type}")
             
             # 薪资
-            salary = format_salary(job.get('salary_range'))
+            salary = job.get("salary") or format_salary(job.get('salary_range'))
             st.markdown(f"💰 {salary}")
             
             # 描述摘要
@@ -56,7 +56,7 @@ def render_job_detail(job: Dict[str, Any]):
     with col2:
         st.metric("类型", job.get('job_type', '未知'))
     with col3:
-        st.metric("薪资", format_salary(job.get('salary_range')))
+        st.metric("薪资", job.get("salary") or format_salary(job.get('salary_range')))
     
     st.markdown("### 职位描述")
     st.markdown(job.get('description', '暂无描述'))

@@ -1,78 +1,40 @@
 import streamlit as st
-from typing import List, Dict, Any
+from typing import Dict, Any, List
 import sys
+
 sys.path.insert(0, '.')
 from components.job_card import render_job_card, render_job_detail
-from utils.helpers import format_salary
-
-# Mock 数据用于测试
-MOCK_JOBS = [
-    {
-        "id": "1",
-        "title": "高级 Python 开发工程师",
-        "company": "TechCorp Pty Ltd",
-        "location": "墨尔本",
-        "job_type": "全职",
-        "salary_range": {"min": 120000, "max": 150000, "currency": "AUD", "period": "year"},
-        "description": "我们正在寻找一位经验丰富的 Python 开发工程师，负责设计和开发高性能的后端服务。需要熟练掌握 Python、Django/FastAPI，有分布式系统经验优先。",
-        "skills": ["Python", "Django", "FastAPI", "PostgreSQL", "Docker", "AWS"],
-        "posted_date": "2024-01-15",
-        "source": "Seek"
-    },
-    {
-        "id": "2",
-        "title": "前端开发工程师",
-        "company": "Digital Solutions",
-        "location": "悉尼",
-        "job_type": "全职",
-        "salary_range": {"min": 90000, "max": 120000, "currency": "AUD", "period": "year"},
-        "description": "寻找一位熟练的前端开发工程师，精通 React 和 TypeScript。负责构建响应式 Web 应用，优化用户体验。",
-        "skills": ["React", "TypeScript", "CSS", "HTML", "Git"],
-        "posted_date": "2024-01-14",
-        "source": "Indeed"
-    },
-    {
-        "id": "3",
-        "title": "数据科学家",
-        "company": "Data Insights Co",
-        "location": "墨尔本",
-        "job_type": "全职",
-        "salary_range": {"min": 130000, "max": 160000, "currency": "AUD", "period": "year"},
-        "description": "数据科学家职位，负责构建机器学习模型，进行数据分析和可视化。需要 Python、SQL 和机器学习经验。",
-        "skills": ["Python", "Machine Learning", "SQL", "TensorFlow", "Pandas"],
-        "posted_date": "2024-01-13",
-        "source": "LinkedIn"
-    },
-    {
-        "id": "4",
-        "title": "DevOps 工程师",
-        "company": "CloudTech Solutions",
-        "location": "布里斯班",
-        "job_type": "全职",
-        "salary_range": {"min": 110000, "max": 140000, "currency": "AUD", "period": "year"},
-        "description": "负责 CI/CD 流程、云基础设施管理和自动化部署。熟悉 AWS、Kubernetes 和 Terraform。",
-        "skills": ["AWS", "Kubernetes", "Docker", "Terraform", "CI/CD"],
-        "posted_date": "2024-01-12",
-        "source": "Seek"
-    },
-    {
-        "id": "5",
-        "title": "产品经理",
-        "company": "InnovateTech",
-        "location": "墨尔本",
-        "job_type": "全职",
-        "salary_range": {"min": 100000, "max": 130000, "currency": "AUD", "period": "year"},
-        "description": "产品经理职位，负责产品战略规划、需求分析和项目管理。需要良好的沟通能力和敏捷开发经验。",
-        "skills": ["Product Strategy", "Agile", "User Research", "Data Analysis"],
-        "posted_date": "2024-01-11",
-        "source": "Indeed"
-    }
-]
+from utils.api import APIClient, APIError, get_default_api_url
 
 st.set_page_config(page_title="职位搜索", page_icon="🔍", layout="wide")
 
 st.title("🔍 职位搜索")
 st.markdown("搜索并浏览职位信息")
+
+
+def _normalize_job(job: Dict[str, Any]) -> Dict[str, Any]:
+    """适配后端字段到前端展示结构。"""
+    normalized = dict(job)
+    normalized.setdefault("job_type", "未知类型")
+    if normalized.get("salary") and not normalized.get("salary_range"):
+        normalized["salary_range"] = None
+    return normalized
+
+
+if "api_url" not in st.session_state:
+    st.session_state["api_url"] = get_default_api_url()
+
+with st.sidebar:
+    st.header("⚙️ 配置")
+    api_url = st.text_input("API 地址", value=st.session_state["api_url"], key="job_search_api_url")
+    st.session_state["api_url"] = (api_url or get_default_api_url()).rstrip("/")
+    st.caption("优先使用侧边栏配置；未配置时读取环境变量 `JOB_MARKET_API_URL` 或 `API_BASE_URL`。")
+
+if "search_result" not in st.session_state:
+    st.session_state["search_result"] = {"jobs": [], "total": 0, "query": ""}
+
+if "selected_job" not in st.session_state:
+    st.session_state["selected_job"] = None
 
 # 搜索表单
 with st.form("search_form"):
@@ -83,37 +45,57 @@ with st.form("search_form"):
         location = st.text_input("地点", placeholder="例如: 墨尔本")
     with col3:
         max_results = st.number_input("结果数量", min_value=5, max_value=50, value=20)
-    
+
     submitted = st.form_submit_button("搜索", type="primary")
 
-# 显示结果
-if submitted and query:
-    st.subheader(f"搜索结果: {query}")
-    
-    # 使用 mock 数据（实际应该调用 API）
-    # 这里简单过滤 mock 数据
-    filtered_jobs = [job for job in MOCK_JOBS if query.lower() in job["title"].lower()]
-    if location:
-        filtered_jobs = [job for job in filtered_jobs if location in job["location"]]
-    
-    if not filtered_jobs:
-        filtered_jobs = MOCK_JOBS  # 如果没有匹配，显示所有 mock 数据
-    
-    st.write(f"找到 {len(filtered_jobs)} 个职位")
-    
-    # 显示职位列表
-    for i, job in enumerate(filtered_jobs):
-        render_job_card(job, i)
-    
-    # 职位详情弹窗
-    if st.button("查看详情", key="detail_btn"):
-        st.session_state["show_detail"] = True
+if submitted:
+    if not query.strip():
+        st.warning("请输入职位关键词后再搜索。")
+    else:
+        client = APIClient(st.session_state["api_url"])
+        with st.spinner("正在搜索职位，请稍候..."):
+            try:
+                result = client.search_jobs(
+                    query=query.strip(),
+                    location=location.strip() or None,
+                    max_results=int(max_results),
+                )
+                jobs = result.get("jobs", [])
+                if not isinstance(jobs, list):
+                    raise APIError("返回数据格式错误：`jobs` 字段不是列表。")
+                st.session_state["search_result"] = {
+                    "jobs": [_normalize_job(job) for job in jobs],
+                    "total": result.get("total", len(jobs)),
+                    "query": result.get("query", query.strip()),
+                }
+                st.session_state["selected_job"] = None
+            except APIError as exc:
+                st.error(f"搜索失败：{exc}")
+            except Exception as exc:
+                st.error(f"发生未知错误：{exc}")
+
+search_result = st.session_state["search_result"]
+jobs: List[Dict[str, Any]] = search_result.get("jobs", [])
+search_query = search_result.get("query", "")
+
+if search_query:
+    st.subheader(f"搜索结果: {search_query}")
+    st.write(f"找到 {search_result.get('total', len(jobs))} 个职位")
+
+if jobs:
+    for idx, job in enumerate(jobs):
+        render_job_card(job, idx)
+        if st.button("查看详情", key=f"detail_{job.get('id', idx)}"):
+            st.session_state["selected_job"] = idx
+
+    if st.session_state["selected_job"] is not None:
+        selected_idx = st.session_state["selected_job"]
+        if 0 <= selected_idx < len(jobs):
+            with st.expander("职位详情", expanded=True):
+                render_job_detail(jobs[selected_idx])
+elif search_query:
+    st.info("未找到匹配职位，请尝试更换关键词或地点。")
 
 else:
-    # 显示热门职位或示例
-    st.subheader("热门职位")
-    st.info("输入关键词开始搜索职位")
-    
-    # 显示 mock 数据作为示例
-    for i, job in enumerate(MOCK_JOBS[:3]):
-        render_job_card(job, i)
+    st.subheader("开始搜索")
+    st.info("输入关键词并点击“搜索”后显示真实职位结果。")
