@@ -1,0 +1,12 @@
+[build]
+# 使用 Nixpacks 自动识别 Python 项目并构建
+builder = "NIXPACKS"
+
+[deploy]
+# 启动命令与 Dockerfile 保持一致，兼容 Railway 的 PORT 变量
+startCommand = "sh -c 'uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}'"
+# 健康检查路径（由后端 /api/health 提供）
+healthcheckPath = "/api/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

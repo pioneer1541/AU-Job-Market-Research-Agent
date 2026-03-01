@@ -106,6 +106,27 @@ docker compose up -d --build
 docker compose logs -f backend
 ```
 
+### Railway 部署
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/pioneer1541/AU-Job-Market-Research-Agent)
+
+1. 在 Railway 创建项目并连接本仓库（或使用上方一键部署按钮）。
+2. 在 Railway 项目 `Variables` 中配置环境变量（可参考 `.env.production.example`）：
+   - `LLM_API_KEY`
+   - `LLM_BASE_URL`
+   - `APIFY_API_TOKEN`
+   - 可选：`APP_ENV=production`、`LOG_LEVEL=INFO`
+3. Railway 会自动读取仓库根目录的 `railway.toml`（`railway.json` 也已提供）。
+4. 部署后可通过以下路径验证服务：
+   - 健康检查：`/api/health`
+   - 文档页面：`/docs`
+
+Railway 运行时会自动注入 `PORT` 环境变量，启动命令已配置为：
+
+```bash
+sh -c 'uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}'
+```
+
 ### 生产部署建议
 
 - 至少配置 `LLM_API_KEY`、`LLM_BASE_URL`、`APIFY_API_TOKEN`

@@ -66,6 +66,7 @@ data/
 *.json
 !backend/tests/fixtures/*.json
 !package.json
+!railway.json
 
 # Local agent/tooling metadata
 .clawhub/
