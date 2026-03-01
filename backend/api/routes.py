@@ -3,9 +3,13 @@ API 路由定义
 """
 
 import logging
+import os
+from collections import Counter
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
+from backend.agents.graph import get_compiled_graph
+from backend.agents.nodes import job_fetcher_node
 from backend.api.schemas import (
     SearchRequest,
     JobSearchResponse,
@@ -96,6 +100,132 @@ MOCK_ANALYSES: dict[str, JobAnalysis] = {
 }
 
 
+def _format_query(query: str, location: Optional[str]) -> str:
+    """构造传递给 graph/node 的查询语句。"""
+    if location:
+        return f"{query} in {location}"
+    return query
+
+
+def _is_paid_api_enabled() -> bool:
+    """
+    是否允许调用可能产生费用的外部 API。
+    默认关闭，避免误触发付费调用。
+    """
+    return os.getenv("ENABLE_PAID_APIS", "false").lower() in {"1", "true", "yes", "on"}
+
+
+def _build_mock_search_jobs(query: str, location: Optional[str], max_results: int) -> list[JobListing]:
+    """按查询条件过滤 mock 职位。"""
+    all_jobs = list(MOCK_JOBS.values())
+    query_lower = query.lower()
+    filtered_jobs = [
+        job for job in all_jobs
+        if query_lower in job.title.lower() or query_lower in job.description.lower()
+    ]
+
+    if location:
+        location_lower = location.lower()
+        filtered_jobs = [
+            job for job in filtered_jobs
+            if location_lower in job.location.lower()
+        ]
+
+    return filtered_jobs[:max_results]
+
+
+def _convert_state_jobs_to_api_jobs(raw_jobs: list[dict], max_results: int) -> list[JobListing]:
+    """将 graph state 中的职位结构转换为 API Schema。"""
+    jobs: list[JobListing] = []
+    for item in raw_jobs:
+        try:
+            jobs.append(
+                JobListing(
+                    id=str(item.get("id", "")),
+                    title=str(item.get("title", "")),
+                    company=str(item.get("company", "")),
+                    location=str(item.get("location", "")),
+                    salary=item.get("salary"),
+                    description=str(item.get("description", "")),
+                    url=str(item.get("url", "")),
+                    source=str(item.get("source", "unknown")),
+                    posted_date=item.get("posted_date"),
+                )
+            )
+        except Exception as e:
+            logger.warning(f"跳过无法解析的职位数据: {e}")
+            continue
+    return jobs[:max_results]
+
+
+def _build_market_insights_from_graph(jobs: list[JobListing], graph_result: dict) -> MarketInsights:
+    """将 LangGraph 输出映射为 API 的 MarketInsights。"""
+    market_insights = graph_result.get("market_insights", {}) or {}
+    top_skills_raw = market_insights.get("top_skills", []) or []
+    top_skills = [item.get("skill", "") for item in top_skills_raw if item.get("skill")]
+
+    company_counts = Counter(job.company for job in jobs if job.company)
+    top_companies = [company for company, _ in company_counts.most_common(5)]
+
+    location_counts = Counter(job.location for job in jobs if job.location)
+
+    salary_stats = market_insights.get("salary_stats") or {}
+    avg_salary_range = None
+    if salary_stats:
+        currency = salary_stats.get("currency", "AUD")
+        min_salary = salary_stats.get("min")
+        max_salary = salary_stats.get("max")
+        if min_salary is not None and max_salary is not None:
+            avg_salary_range = f"{currency} {int(min_salary):,} - {int(max_salary):,}"
+
+    return MarketInsights(
+        total_jobs=len(jobs),
+        avg_salary_range=avg_salary_range,
+        top_skills=top_skills[:10],
+        top_companies=top_companies,
+        experience_distribution=market_insights.get("experience_distribution", {}) or {},
+        location_distribution=dict(location_counts),
+    )
+
+
+def _build_mock_analyze_response(query: str, location: Optional[str], max_results: int) -> AnalyzeResponse:
+    """构建原有 mock 分析响应，作为失败兜底。"""
+    result_jobs = _build_mock_search_jobs(query=query, location=location, max_results=max_results)
+
+    insights = MarketInsights(
+        total_jobs=len(result_jobs),
+        avg_salary_range="$140,000 - $170,000",
+        top_skills=["Python", "PyTorch", "TensorFlow", "AWS", "Docker"],
+        top_companies=["TechCorp Melbourne", "DataDriven Inc", "Innovation Labs"],
+        experience_distribution={"Senior": 2, "Mid-Senior": 1},
+        location_distribution={"Melbourne, VIC": 1, "Sydney, NSW": 1, "Remote": 1},
+    )
+
+    report = f"""# {query} 市场分析报告
+
+## 概览
+共找到 {len(result_jobs)} 个相关职位。
+
+## 薪资范围
+平均薪资范围: {insights.avg_salary_range}
+
+## 热门技能
+{chr(10).join(f"- {skill}" for skill in insights.top_skills)}
+
+## 经验分布
+{chr(10).join(f"- {level}: {count} 个职位" for level, count in insights.experience_distribution.items())}
+
+## 建议
+当前市场对 {query} 需求较高，建议重点关注 Python 和机器学习相关技能。
+"""
+
+    return AnalyzeResponse(
+        market_insights=insights,
+        jobs=result_jobs,
+        report=report,
+    )
+
+
 # ==================== 新版 API 端点 ====================
 
 @router.post(
@@ -114,40 +244,40 @@ async def search_jobs(request: SearchRequest) -> JobSearchResponse:
         JobSearchResponse: 包含职位列表、总数和查询信息
         
     Note:
-        当前返回 mock 数据，后续会接入真实 API
+        优先调用 LangGraph 的 job_fetcher_node，失败时回落到 mock 数据
     """
     logger.info(f"搜索职位: query={request.query}, location={request.location}, max_results={request.max_results}")
     
     try:
-        # TODO: 接入真实的 Apify API
-        # 当前使用 mock 数据
-        all_jobs = list(MOCK_JOBS.values())
-        
-        # 简单过滤：根据查询关键词过滤标题
-        query_lower = request.query.lower()
-        filtered_jobs = [
-            job for job in all_jobs
-            if query_lower in job.title.lower() or query_lower in job.description.lower()
-        ]
-        
-        # 如果指定了地点，进一步过滤
-        if request.location:
-            location_lower = request.location.lower()
-            filtered_jobs = [
-                job for job in filtered_jobs
-                if location_lower in job.location.lower()
-            ]
-        
-        # 限制结果数量
-        result_jobs = filtered_jobs[:request.max_results]
-        
+        result_jobs: list[JobListing] = []
+
+        if _is_paid_api_enabled():
+            state = {
+                "query": _format_query(request.query, request.location),
+                "job_listings": [],
+                "analysis_results": [],
+                "errors": [],
+            }
+            fetch_result = await job_fetcher_node(state)
+            result_jobs = _convert_state_jobs_to_api_jobs(
+                fetch_result.get("job_listings", []),
+                request.max_results,
+            )
+            if fetch_result.get("errors"):
+                logger.warning(f"job_fetcher_node 返回错误: {fetch_result['errors']}")
+        else:
+            logger.info("ENABLE_PAID_APIS 未开启，跳过真实抓取流程，使用 mock fallback")
+
+        if not result_jobs:
+            result_jobs = _build_mock_search_jobs(
+                query=request.query,
+                location=request.location,
+                max_results=request.max_results,
+            )
+
         logger.info(f"找到 {len(result_jobs)} 个职位")
-        
-        return JobSearchResponse(
-            jobs=result_jobs,
-            total=len(result_jobs),
-            query=request.query,
-        )
+
+        return JobSearchResponse(jobs=result_jobs, total=len(result_jobs), query=request.query)
         
     except Exception as e:
         logger.error(f"搜索职位失败: {e}")
@@ -219,67 +349,46 @@ async def analyze_market(
         AnalyzeResponse: 包含市场洞察、职位列表和分析报告
         
     Note:
-        当前使用 mock 数据，后续会接入真实分析流程
+        优先调用 LangGraph 完整流程，失败时回落到 mock 数据
     """
     logger.info(f"市场分析: query={query}, location={location}, max_results={max_results}")
     
     try:
-        # TODO: 接入真实的分析流程
-        # 当前使用 mock 数据
-        
-        # 获取职位列表
-        all_jobs = list(MOCK_JOBS.values())
-        query_lower = query.lower()
-        filtered_jobs = [
-            job for job in all_jobs
-            if query_lower in job.title.lower() or query_lower in job.description.lower()
-        ]
-        
-        if location:
-            location_lower = location.lower()
-            filtered_jobs = [
-                job for job in filtered_jobs
-                if location_lower in job.location.lower()
-            ]
-        
-        result_jobs = filtered_jobs[:max_results]
-        
-        # 生成市场洞察
-        insights = MarketInsights(
-            total_jobs=len(result_jobs),
-            avg_salary_range="$140,000 - $170,000",
-            top_skills=["Python", "PyTorch", "TensorFlow", "AWS", "Docker"],
-            top_companies=["TechCorp Melbourne", "DataDriven Inc", "Innovation Labs"],
-            experience_distribution={"Senior": 2, "Mid-Senior": 1},
-            location_distribution={"Melbourne, VIC": 1, "Sydney, NSW": 1, "Remote": 1},
+        if _is_paid_api_enabled():
+            app = get_compiled_graph()
+            initial_state = {
+                "query": _format_query(query, location),
+                "job_listings": [],
+                "analysis_results": [],
+                "errors": [],
+            }
+            graph_result = await app.ainvoke(initial_state)
+
+            result_jobs = _convert_state_jobs_to_api_jobs(
+                graph_result.get("job_listings", []),
+                max_results,
+            )
+            if result_jobs:
+                insights = _build_market_insights_from_graph(result_jobs, graph_result)
+                report = graph_result.get("report", "") or f"# {query} 市场分析报告\n\n暂无详细报告。"
+                logger.info(f"市场分析完成（LangGraph）: {len(result_jobs)} 个职位")
+                return AnalyzeResponse(
+                    market_insights=insights,
+                    jobs=result_jobs,
+                    report=report,
+                )
+
+            logger.warning("LangGraph 未返回职位数据，切换到 mock fallback")
+        else:
+            logger.info("ENABLE_PAID_APIS 未开启，跳过 LangGraph 真实流程，使用 mock fallback")
+
+        fallback_response = _build_mock_analyze_response(
+            query=query,
+            location=location,
+            max_results=max_results,
         )
-        
-        # 生成报告
-        report = f"""# {query} 市场分析报告
-
-## 概览
-共找到 {len(result_jobs)} 个相关职位。
-
-## 薪资范围
-平均薪资范围: {insights.avg_salary_range}
-
-## 热门技能
-{chr(10).join(f"- {skill}" for skill in insights.top_skills)}
-
-## 经验分布
-{chr(10).join(f"- {level}: {count} 个职位" for level, count in insights.experience_distribution.items())}
-
-## 建议
-当前市场对 {query} 需求较高，建议重点关注 Python 和机器学习相关技能。
-"""
-        
-        logger.info(f"市场分析完成: {len(result_jobs)} 个职位")
-        
-        return AnalyzeResponse(
-            market_insights=insights,
-            jobs=result_jobs,
-            report=report,
-        )
+        logger.info(f"市场分析完成（mock fallback）: {len(fallback_response.jobs)} 个职位")
+        return fallback_response
         
     except Exception as e:
         logger.error(f"市场分析失败: {e}")
