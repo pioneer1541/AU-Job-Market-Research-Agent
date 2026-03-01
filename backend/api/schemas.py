@@ -88,6 +88,36 @@ class AnalyzeResponse(BaseModel):
     report: str = Field(default="", description="分析报告")
 
 
+# ==================== 报告历史模型 ====================
+
+class ReportSummary(BaseModel):
+    """报告摘要模型"""
+    id: str = Field(..., description="报告唯一标识")
+    query: str = Field(..., description="查询关键词")
+    location: str = Field(default="", description="查询地点")
+    max_results: int = Field(..., description="样本上限")
+    results_count: int = Field(default=0, description="职位数量")
+    created_at: str = Field(..., description="报告生成时间")
+
+
+class ReportListResponse(BaseModel):
+    """报告列表响应模型"""
+    total: int = Field(default=0, description="报告总数")
+    reports: list[ReportSummary] = Field(default_factory=list, description="报告摘要列表")
+
+
+class ReportDetailResponse(BaseModel):
+    """报告详情响应模型"""
+    id: str = Field(..., description="报告唯一标识")
+    query: str = Field(..., description="查询关键词")
+    location: str = Field(default="", description="查询地点")
+    max_results: int = Field(..., description="样本上限")
+    created_at: str = Field(..., description="报告生成时间")
+    market_insights: MarketInsights = Field(default_factory=MarketInsights, description="市场洞察")
+    jobs: list[JobListing] = Field(default_factory=list, description="职位样本")
+    report: str = Field(default="", description="完整报告文本")
+
+
 # ==================== 系统状态模型 ====================
 
 class HealthResponse(BaseModel):

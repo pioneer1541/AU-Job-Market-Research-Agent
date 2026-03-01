@@ -5,6 +5,7 @@ API 路由定义
 import logging
 import os
 from collections import Counter
+from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
@@ -18,6 +19,9 @@ from backend.api.schemas import (
     JobAnalysis,
     AnalyzeResponse,
     MarketInsights,
+    ReportListResponse,
+    ReportSummary,
+    ReportDetailResponse,
     HealthResponse,
     ErrorResponse,
     # 旧版兼容
@@ -25,6 +29,7 @@ from backend.api.schemas import (
     SearchResponse,
     StatusResponse,
 )
+from backend.services.database import get_database_service
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -234,6 +239,30 @@ def _build_mock_analyze_response(query: str, location: Optional[str], max_result
     )
 
 
+def _attach_report_meta(
+    insights: MarketInsights,
+    query: str,
+    location: Optional[str],
+    max_results: int,
+    report_id: Optional[str] = None,
+    created_at: Optional[str] = None,
+) -> MarketInsights:
+    """为市场洞察补充报告元信息。"""
+    meta = dict(insights.report_meta or {})
+    meta.update(
+        {
+            "query": query,
+            "location": location or "",
+            "max_results": int(max_results),
+            "generated_at": created_at or datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+    if report_id:
+        meta["report_id"] = report_id
+
+    return insights.model_copy(update={"report_meta": meta})
+
+
 # ==================== 新版 API 端点 ====================
 
 @router.post(
@@ -362,6 +391,9 @@ async def analyze_market(
     logger.info(f"市场分析: query={query}, location={location}, max_results={max_results}")
     
     try:
+        db_service = get_database_service()
+        response_payload: Optional[AnalyzeResponse] = None
+
         if _is_paid_api_enabled():
             app = get_compiled_graph()
             initial_state = {
@@ -379,24 +411,42 @@ async def analyze_market(
             if result_jobs:
                 insights = _build_market_insights_from_graph(result_jobs, graph_result)
                 report = graph_result.get("report", "") or f"# {query} 市场分析报告\n\n暂无详细报告。"
-                logger.info(f"市场分析完成（LangGraph）: {len(result_jobs)} 个职位")
-                return AnalyzeResponse(
+                response_payload = AnalyzeResponse(
                     market_insights=insights,
                     jobs=result_jobs,
                     report=report,
                 )
+                logger.info(f"市场分析完成（LangGraph）: {len(result_jobs)} 个职位")
 
-            logger.warning("LangGraph 未返回职位数据，切换到 mock fallback")
+            if not response_payload:
+                logger.warning("LangGraph 未返回职位数据，切换到 mock fallback")
         else:
             logger.info("ENABLE_PAID_APIS 未开启，跳过 LangGraph 真实流程，使用 mock fallback")
 
-        fallback_response = _build_mock_analyze_response(
+        if not response_payload:
+            response_payload = _build_mock_analyze_response(
+                query=query,
+                location=location,
+                max_results=max_results,
+            )
+            logger.info(f"市场分析完成（mock fallback）: {len(response_payload.jobs)} 个职位")
+
+        report_id = db_service.save_report(
             query=query,
             location=location,
             max_results=max_results,
+            report=response_payload.report,
+            market_insights=response_payload.market_insights.model_dump(),
+            jobs=[job.model_dump() for job in response_payload.jobs],
         )
-        logger.info(f"市场分析完成（mock fallback）: {len(fallback_response.jobs)} 个职位")
-        return fallback_response
+        response_payload.market_insights = _attach_report_meta(
+            insights=response_payload.market_insights,
+            query=query,
+            location=location,
+            max_results=max_results,
+            report_id=report_id,
+        )
+        return response_payload
         
     except Exception as e:
         logger.error(f"市场分析失败: {e}")
@@ -404,6 +454,67 @@ async def analyze_market(
             status_code=500,
             detail=f"分析失败: {str(e)}"
         )
+
+
+@router.get(
+    "/reports",
+    response_model=ReportListResponse,
+    summary="查询历史报告",
+    description="按时间倒序返回已保存的市场分析报告摘要",
+)
+async def list_reports(
+    limit: int = Query(default=20, ge=1, le=100, description="返回条数"),
+    offset: int = Query(default=0, ge=0, description="偏移量"),
+) -> ReportListResponse:
+    """历史报告列表端点。"""
+    db_service = get_database_service()
+    reports = db_service.list_reports(limit=limit, offset=offset)
+    total = db_service.count_reports()
+    return ReportListResponse(
+        total=total,
+        reports=[ReportSummary(**item) for item in reports],
+    )
+
+
+@router.get(
+    "/reports/{report_id}",
+    response_model=ReportDetailResponse,
+    summary="查看报告详情",
+    description="根据报告 ID 返回完整报告内容和市场洞察",
+    responses={404: {"model": ErrorResponse, "description": "报告不存在"}},
+)
+async def get_report_detail(report_id: str) -> ReportDetailResponse:
+    """报告详情端点。"""
+    db_service = get_database_service()
+    report_data = db_service.get_report(report_id)
+    if not report_data:
+        raise HTTPException(status_code=404, detail=f"报告不存在: {report_id}")
+
+    insights = _attach_report_meta(
+        insights=MarketInsights(**(report_data.get("market_insights") or {})),
+        query=report_data["query"],
+        location=report_data.get("location"),
+        max_results=report_data["max_results"],
+        report_id=report_data["id"],
+        created_at=report_data.get("created_at"),
+    )
+
+    jobs = [
+        JobListing(**item)
+        for item in (report_data.get("jobs") or [])
+        if isinstance(item, dict)
+    ]
+
+    return ReportDetailResponse(
+        id=report_data["id"],
+        query=report_data["query"],
+        location=report_data.get("location", ""),
+        max_results=report_data["max_results"],
+        created_at=report_data.get("created_at", ""),
+        market_insights=insights,
+        jobs=jobs,
+        report=report_data.get("report", ""),
+    )
 
 
 @router.get(

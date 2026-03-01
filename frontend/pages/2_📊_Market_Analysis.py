@@ -1,7 +1,6 @@
 import re
 import sys
 import time
-import uuid
 from collections import Counter
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -115,29 +114,6 @@ def _render_empty_state(title: str, description: str) -> None:
     )
 
 
-def _append_analysis_history(
-    query: str,
-    location: Optional[str],
-    max_results: int,
-    result: Dict[str, Any],
-) -> None:
-    market_insights = result.get("market_insights", {}) or {}
-    history = st.session_state.setdefault("analysis_history", [])
-    history.insert(
-        0,
-        {
-            "id": f"a-{uuid.uuid4().hex[:10]}",
-            "type": "analysis",
-            "query": query,
-            "location": location or "",
-            "max_results": max_results,
-            "results_count": market_insights.get("total_jobs", len(result.get("jobs", []))),
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-        },
-    )
-    st.session_state["analysis_history"] = history[:100]
-
-
 def _execute_analysis(query: str, location: Optional[str], max_results: int) -> None:
     client = APIClient(st.session_state["api_url"])
     progress = st.progress(0, text="准备分析任务...")
@@ -148,7 +124,11 @@ def _execute_analysis(query: str, location: Optional[str], max_results: int) -> 
             result = client.analyze_market(query=query, location=location, max_results=max_results)
             progress.progress(80, text="正在整理图表数据...")
             st.session_state["market_analysis_result"] = result
-            _append_analysis_history(query=query, location=location, max_results=max_results, result=result)
+            st.session_state["analysis_defaults"] = {
+                "query": query,
+                "location": location or "",
+                "max_results": int(max_results),
+            }
             time.sleep(0.1)
 
         progress.progress(100, text="分析完成")
@@ -169,8 +149,12 @@ if "api_url" not in st.session_state:
 if "market_analysis_result" not in st.session_state:
     st.session_state["market_analysis_result"] = None
 
-if "analysis_history" not in st.session_state:
-    st.session_state["analysis_history"] = []
+if "analysis_defaults" not in st.session_state:
+    st.session_state["analysis_defaults"] = {
+        "query": "",
+        "location": "",
+        "max_results": 20,
+    }
 
 with st.sidebar:
     st.header("⚙️ 配置")
@@ -181,25 +165,48 @@ with st.sidebar:
 pending_analysis = st.session_state.pop("pending_analysis", None)
 if pending_analysis:
     st.info("已从历史记录载入参数，正在重新分析...")
+    st.session_state["analysis_defaults"] = {
+        "query": pending_analysis.get("query", "").strip(),
+        "location": (pending_analysis.get("location") or "").strip(),
+        "max_results": int(pending_analysis.get("max_results", 20)),
+    }
     _execute_analysis(
         query=pending_analysis.get("query", "").strip(),
         location=(pending_analysis.get("location") or "").strip() or None,
         max_results=int(pending_analysis.get("max_results", 20)),
     )
 
+analysis_defaults = st.session_state.get("analysis_defaults", {})
+
 with st.expander("分析参数", expanded=True):
     c1, c2, c3 = st.columns([3, 2, 1])
     with c1:
-        analysis_query = st.text_input("分析关键词", placeholder="例如: Data Scientist")
+        analysis_query = st.text_input(
+            "分析关键词",
+            value=str(analysis_defaults.get("query", "")),
+            placeholder="例如: Data Scientist",
+        )
     with c2:
-        analysis_location = st.text_input("地点筛选", placeholder="例如: Melbourne")
+        analysis_location = st.text_input(
+            "地点筛选",
+            value=str(analysis_defaults.get("location", "")),
+            placeholder="例如: Melbourne",
+        )
     with c3:
-        analysis_max_results = st.number_input("结果数量", min_value=5, max_value=100, value=20)
+        default_max_results = int(analysis_defaults.get("max_results", 20))
+        if default_max_results < 5 or default_max_results > 100:
+            default_max_results = 20
+        analysis_max_results = st.number_input("结果数量", min_value=5, max_value=100, value=default_max_results)
 
     if st.button("生成分析报告", type="primary", use_container_width=True):
         if not analysis_query.strip():
             st.warning("请输入分析关键词后再生成。")
         else:
+            st.session_state["analysis_defaults"] = {
+                "query": analysis_query.strip(),
+                "location": analysis_location.strip(),
+                "max_results": int(analysis_max_results),
+            }
             _execute_analysis(
                 query=analysis_query.strip(),
                 location=analysis_location.strip() or None,

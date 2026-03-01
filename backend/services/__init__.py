@@ -4,6 +4,7 @@ Services Package
 提供外部 API 集成服务。
 """
 from .apify_client import ApifyClient, ApifyError, ApifyRateLimitError, fetch_jobs_from_seek
+from .database import DatabaseService, get_database_service
 from .statistics import StatisticsService, parse_salary_text
 from .report_generator import ReportGenerator
 
@@ -15,4 +16,6 @@ __all__ = [
     "StatisticsService",
     "parse_salary_text",
     "ReportGenerator",
+    "DatabaseService",
+    "get_database_service",
 ]

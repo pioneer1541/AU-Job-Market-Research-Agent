@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 
 from backend.api.routes import router as api_router
 from backend.api.schemas import ErrorResponse
+from backend.services.database import get_database_service
 
 # 配置日志
 logging.basicConfig(
@@ -25,6 +26,9 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时执行
     logger.info("Starting Job Market Research Agent...")
+    # 初始化 SQLite 数据库
+    get_database_service().init_db()
+    logger.info("SQLite 数据库初始化完成")
     yield
     # 关闭时执行
     logger.info("Shutting down Job Market Research Agent...")

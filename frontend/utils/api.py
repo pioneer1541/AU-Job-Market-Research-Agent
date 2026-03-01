@@ -207,6 +207,34 @@ def _normalize_analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _normalize_report_detail_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """将报告详情接口返回结构适配为分析页可直接使用的数据。"""
+    normalized = _normalize_analyze_payload(payload)
+    report_id = str(payload.get("id", "")).strip()
+    query = str(payload.get("query", "")).strip()
+    location = str(payload.get("location", "")).strip()
+
+    try:
+        max_results = int(payload.get("max_results", 20))
+    except (TypeError, ValueError):
+        max_results = 20
+
+    created_at = str(payload.get("created_at", "")).strip()
+    normalized["meta"]["report_id"] = report_id
+    normalized["meta"]["query"] = query
+    normalized["meta"]["location"] = location
+    normalized["meta"]["max_results"] = max_results
+    if created_at:
+        normalized["meta"]["generated_at"] = created_at
+
+    normalized["query"] = query
+    normalized["location"] = location
+    normalized["max_results"] = max_results
+    normalized["report_id"] = report_id
+    normalized["created_at"] = created_at
+    return normalized
+
+
 class APIClient:
     def __init__(self, base_url: Optional[str] = None, timeout: Optional[float] = None):
         self.base_url = (base_url or get_default_api_url()).rstrip("/")
@@ -269,3 +297,13 @@ class APIClient:
     def health_check(self) -> Dict[str, Any]:
         """调用健康检查接口。"""
         return self._request("GET", "/api/health")
+
+    def list_reports(self, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+        """调用历史报告列表接口。"""
+        params = {"limit": int(limit), "offset": int(offset)}
+        return self._request("GET", "/api/reports", params=params)
+
+    def get_report_detail(self, report_id: str) -> Dict[str, Any]:
+        """调用报告详情接口并标准化为分析页结构。"""
+        payload = self._request("GET", f"/api/reports/{report_id}")
+        return _normalize_report_detail_payload(payload)
