@@ -1,17 +1,110 @@
-"""Pydantic schemas for API request/response models."""
+"""Pydantic schemas for API request/response models.
+请求和响应模型定义
+"""
 
+from typing import Optional
 from pydantic import BaseModel, Field
 
 
-class SearchParams(BaseModel):
-    """Parameters for job search."""
+# ==================== Job 相关模型 ====================
 
+class JobListing(BaseModel):
+    """职位信息模型"""
+    id: str = Field(..., description="职位唯一标识")
+    title: str = Field(..., description="职位标题")
+    company: str = Field(..., description="公司名称")
+    location: str = Field(..., description="工作地点")
+    salary: Optional[str] = Field(None, description="薪资范围")
+    description: str = Field(default="", description="职位描述")
+    url: str = Field(default="", description="职位链接")
+    source: str = Field(default="unknown", description="数据来源")
+    posted_date: Optional[str] = Field(None, description="发布日期")
+
+
+class JobAnalysis(BaseModel):
+    """职位分析结果"""
+    job_id: str = Field(..., description="关联的职位ID")
+    skills_required: list[str] = Field(default_factory=list, description="所需技能")
+    experience_level: str = Field(default="", description="经验要求")
+    salary_estimate: Optional[str] = Field(None, description="薪资估算")
+    key_requirements: list[str] = Field(default_factory=list, description="关键要求")
+    industry: Optional[str] = Field(None, description="所属行业")
+
+
+class JobDetailResponse(BaseModel):
+    """单个职位详情响应"""
+    id: str
+    title: str
+    company: str
+    location: str
+    salary: Optional[str] = None
+    description: str = ""
+    url: str = ""
+    source: str = "unknown"
+    posted_date: Optional[str] = None
+    analysis: Optional[JobAnalysis] = None
+
+
+# ==================== 搜索相关模型 ====================
+
+class SearchRequest(BaseModel):
+    """搜索请求模型"""
+    query: str = Field(..., description="搜索关键词", min_length=1)
+    location: Optional[str] = Field(None, description="工作地点")
+    max_results: int = Field(default=20, description="最大结果数", ge=1, le=100)
+
+
+class JobSearchResponse(BaseModel):
+    """职位搜索响应"""
+    jobs: list[JobListing] = Field(default_factory=list, description="职位列表")
+    total: int = Field(default=0, description="结果总数")
+    query: str = Field(..., description="搜索查询")
+
+
+# ==================== 分析相关模型 ====================
+
+class MarketInsights(BaseModel):
+    """市场洞察模型"""
+    total_jobs: int = Field(default=0, description="职位总数")
+    avg_salary_range: Optional[str] = Field(None, description="平均薪资范围")
+    top_skills: list[str] = Field(default_factory=list, description="热门技能")
+    top_companies: list[str] = Field(default_factory=list, description="热门公司")
+    experience_distribution: dict[str, int] = Field(default_factory=dict, description="经验分布")
+    location_distribution: dict[str, int] = Field(default_factory=dict, description="地点分布")
+
+
+class AnalyzeResponse(BaseModel):
+    """市场分析响应"""
+    market_insights: MarketInsights = Field(default_factory=MarketInsights, description="市场洞察")
+    jobs: list[JobListing] = Field(default_factory=list, description="职位列表")
+    report: str = Field(default="", description="分析报告")
+
+
+# ==================== 系统状态模型 ====================
+
+class HealthResponse(BaseModel):
+    """健康检查响应"""
+    status: str = Field(default="ok", description="服务状态")
+    version: str = Field(default="0.1.0", description="版本号")
+
+
+class ErrorResponse(BaseModel):
+    """错误响应模型"""
+    error: str = Field(..., description="错误类型")
+    message: str = Field(..., description="错误信息")
+    detail: Optional[str] = Field(None, description="详细信息")
+
+
+# ==================== 保留旧模型以兼容 ====================
+
+class SearchParams(BaseModel):
+    """参数搜索模型（旧版兼容）"""
     search_term: str = Field(..., description="Job search keyword", min_length=1)
     location: str = Field(default="Melbourne", description="City or location")
-    state: str | None = Field(default=None, description="State filter (e.g., VIC)")
+    state: Optional[str] = Field(default=None, description="State filter (e.g., VIC)")
     max_results: int = Field(default=200, description="Maximum listings to fetch", ge=10, le=550)
-    salary_min: int | None = Field(default=None, description="Minimum salary filter")
-    salary_max: int | None = Field(default=None, description="Maximum salary filter")
+    salary_min: Optional[int] = Field(default=None, description="Minimum salary filter")
+    salary_max: Optional[int] = Field(default=None, description="Maximum salary filter")
     work_types: list[str] = Field(default=["Full Time", "Contract"], description="Work types")
     work_arrangements: list[str] = Field(
         default=["On-site", "Hybrid", "Remote"], description="Work arrangements"
@@ -20,17 +113,15 @@ class SearchParams(BaseModel):
 
 
 class SearchResponse(BaseModel):
-    """Response for search creation."""
-
+    """搜索响应（旧版兼容）"""
     search_id: str
     status: str
-    message: str | None = None
+    message: Optional[str] = None
 
 
 class StatusResponse(BaseModel):
-    """Response for pipeline status."""
-
+    """状态响应（旧版兼容）"""
     search_id: str
     stage: str  # pending, fetching, cleaning, analyzing, generating, completed, failed
     progress: int  # 0-100
-    message: str | None = None
+    message: Optional[str] = None
