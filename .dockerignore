@@ -1,0 +1,33 @@
+# Git 与本地开发目录
+.git
+.gitignore
+.pytest_cache
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Python 构建产物
+build
+dist
+*.egg-info
+
+# 测试与文档
+tests
+backend/tests
+docs
+
+# 前端代码（当前镜像仅运行后端）
+frontend
+
+# IDE 与系统文件
+.idea
+.vscode
+.DS_Store
+
+# 环境变量文件（防止打入镜像）
+.env
+.env.*
+!.env.example

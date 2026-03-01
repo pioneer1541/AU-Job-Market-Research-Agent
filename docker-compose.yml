@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  backend:
+    # 使用当前目录 Dockerfile 构建后端服务
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: job-market-research-agent
+    env_file:
+      - .env
+    environment:
+      # 覆盖默认环境为生产，可按需调整
+      APP_ENV: production
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
